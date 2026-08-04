@@ -166,7 +166,3 @@ The README inside each download repeats the limitations relevant to that package
 Internal experiments, historical regression fixtures, generated previews, and
 build environments are retained in the private development archive rather than
 the public repository.
-
-## License
-
-See `THIRD_PARTY_NOTICES.md` and `licenses/` inside any release package. The server uses pyserial (BSD); reference material from the C64 Ultimate radar project is GPL-3.0.
