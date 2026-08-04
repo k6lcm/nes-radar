@@ -54,7 +54,7 @@ Plug a normal controller into **port 1** — that's what you use to enter the ai
 Full port pinout, **viewed looking into the jack on the front of the console**:
 
 ```
-               .-
+               .
 pin 1 GND  -- |o\
 pin 2 CLK  -- |o o\ -- pin 5 +5V
 pin 3 OUT0 -- |o o| -- pin 6 D3
