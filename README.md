@@ -170,5 +170,3 @@ the public repository.
 ## License
 
 See `THIRD_PARTY_NOTICES.md` and `licenses/` inside any release package. The server uses pyserial (BSD); reference material from the C64 Ultimate radar project is GPL-3.0.
-
-This repository does not currently include a license for the original NES Radar code and assets. Publishing the source makes it viewable, but does not by itself grant permission to reuse or redistribute it.
