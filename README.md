@@ -102,7 +102,7 @@ This wiring was accepted on an **NTSC** NES. Some PAL consoles have additional p
 The macOS build is a self-contained Universal 2 binary — it carries its own Python and pyserial, so there's nothing to install. It is ad-hoc signed but **not notarized**, so macOS will warn you about it.
 
 ```
-cd NES-Radar-0.3-beta1-macos-universal
+cd NES-Radar-0.3.1-macos-universal
 xattr -dr com.apple.quarantine .
 ./start_nes_radar_server.command
 ```
@@ -161,8 +161,8 @@ The README inside each download repeats the limitations relevant to that package
 
 | Path | What it is |
 |---|---|
-| `nes_radar/` | The buildable 0.3-beta1 NES ROM source, build files, protocol documentation, and required runtime assets. |
-| `server/` | The 0.3-beta1 Python server source, launchers, and native packaging files. |
+| `nes_radar/` | The buildable 0.3.1 NES ROM source, build files, protocol documentation, and required runtime assets. |
+| `server/` | The 0.3.1 Python server source, launchers, and native packaging files. |
 | `executables/` | The hardware-tested ROM, macOS Universal package, portable Python server package, and SHA-256 hashes. |
 
 Internal experiments, historical regression fixtures, generated previews, and

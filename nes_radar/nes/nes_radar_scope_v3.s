@@ -101,6 +101,26 @@ SPLASH_FRAMES         = 120       ; about two seconds at NTSC field rate
 CHR_BANK_SPLASH       = 0
 CHR_BANK_RADAR        = 1
 
+; Splash name and version stamp.  The splash bank is a bitmap of the LDV logo
+; and has no font, so the glyphs are copied out of the LDV font into the tiles it
+; leaves unused at the top of the bank (see the CHR0 segment).  Digits are
+; contiguous, so VER_0 + n is the tile for digit n.  Tile $00 is blank in this
+; bank, which makes it the space.
+VER_GLYPH_BASE        = $E6
+VER_GLYPH_COUNT       = 18        ; ten digits, '.', 'V', then N E S R A D
+VER_0                 = VER_GLYPH_BASE
+VER_DOT               = VER_GLYPH_BASE + 10
+VER_V                 = VER_GLYPH_BASE + 11
+VER_N                 = VER_GLYPH_BASE + 12
+VER_E                 = VER_GLYPH_BASE + 13
+VER_S                 = VER_GLYPH_BASE + 14
+VER_R                 = VER_GLYPH_BASE + 15
+VER_A                 = VER_GLYPH_BASE + 16
+VER_D                 = VER_GLYPH_BASE + 17
+VER_SPACE             = $00
+SPLASH_TITLE_ADDR     = $232C     ; row 25, column 12
+VERSION_STAMP_ADDR    = $236D     ; row 27, column 13 -- one blank row below
+
 .include "ldv_screen.inc"
 .include "assets_metasprite.inc"
 
@@ -2695,6 +2715,8 @@ splash_frames:   .res 1
     inx
     bne @nametable_3
 
+    jsr draw_version_stamp
+
     ldx #0
     lda #$FF
 @clear_oam:
@@ -2711,6 +2733,40 @@ splash_frames:   .res 1
     sta PPUCTRL
     lda #SHOW_BACKGROUND
     sta PPUMASK
+    rts
+.endproc
+
+; Writes the product name and build version into the blank strip below the logo,
+; so a ROM that turns up in the wild says what it is and which build it is.  The
+; splash nametable itself is left alone; the text is painted over it after the
+; upload.  Rendering is still off at this point, so this does not have to fit in
+; vblank.
+.proc draw_version_stamp
+    bit PPUSTATUS
+    lda #>SPLASH_TITLE_ADDR
+    sta PPUADDR
+    lda #<SPLASH_TITLE_ADDR
+    sta PPUADDR
+    ldx #0
+@title:
+    lda splash_title,x
+    sta PPUDATA
+    inx
+    cpx #SPLASH_TITLE_LENGTH
+    bne @title
+
+    bit PPUSTATUS
+    lda #>VERSION_STAMP_ADDR
+    sta PPUADDR
+    lda #<VERSION_STAMP_ADDR
+    sta PPUADDR
+    ldx #0
+@glyph:
+    lda version_stamp,x
+    sta PPUDATA
+    inx
+    cpx #VERSION_STAMP_LENGTH
+    bne @glyph
     rts
 .endproc
 
@@ -2744,6 +2800,16 @@ splash_bg_palette:
     .incbin "assets/splash/splash_bg.palette.bin"
 splash_bg_nam:
     .incbin "assets/splash/splash_bg.nam"
+
+; "NES RADAR"
+splash_title:
+    .byte VER_N, VER_E, VER_S, VER_SPACE, VER_R, VER_A, VER_D, VER_A, VER_R
+SPLASH_TITLE_LENGTH = * - splash_title
+
+; "V0.3.1" -- the release version.  Bump this and the READMEs together.
+version_stamp:
+    .byte VER_V, VER_0 + 0, VER_DOT, VER_0 + 3, VER_DOT, VER_0 + 1
+VERSION_STAMP_LENGTH = * - version_stamp
 
 .segment "RODATA"
 slot_masks:
@@ -2835,7 +2901,20 @@ ldv_bg_att:
     .addr nmi, reset, irq
 
 .segment "CHR0"
-    .incbin "assets/splash/splash_bg.chr"
+    ; splash_bg.chr leaves tiles $E6-$FF blank; the stamp glyphs go there
+    ; instead, lifted from the LDV font so the stamp matches the text the rest of
+    ; the ROM draws.  $E6-$EF are digits 0-9, $F0 '.', $F1 'V', $F2-$F7 N E S R A D.
+    .incbin "assets/splash/splash_bg.chr", 0, VER_GLYPH_BASE * 16
+    .incbin "assets/ldv/ldv_bg.chr", CHAR_0 * 16, 10 * 16
+    .incbin "assets/ldv/ldv_bg.chr", CHAR_DOT * 16, 16
+    .incbin "assets/ldv/ldv_bg.chr", (CHAR_A + 'V' - 'A') * 16, 16
+    .incbin "assets/ldv/ldv_bg.chr", (CHAR_A + 'N' - 'A') * 16, 16
+    .incbin "assets/ldv/ldv_bg.chr", (CHAR_A + 'E' - 'A') * 16, 16
+    .incbin "assets/ldv/ldv_bg.chr", (CHAR_A + 'S' - 'A') * 16, 16
+    .incbin "assets/ldv/ldv_bg.chr", (CHAR_A + 'R' - 'A') * 16, 16
+    .incbin "assets/ldv/ldv_bg.chr", (CHAR_A + 'A' - 'A') * 16, 16
+    .incbin "assets/ldv/ldv_bg.chr", (CHAR_A + 'D' - 'A') * 16, 16
+    .res $1000 - (VER_GLYPH_BASE + VER_GLYPH_COUNT) * 16, $00
     .res $1000, $00
 
 .segment "CHR1"

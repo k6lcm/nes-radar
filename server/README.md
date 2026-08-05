@@ -1,6 +1,6 @@
-# NES Radar Server 0.3-beta1
+# NES Radar Server 0.3.1
 
-This server is paired with the NES Radar 0.3-beta1 ROM. It receives airport
+This server is paired with the NES Radar 0.3.1 ROM. It receives airport
 codes from the NES, retrieves nearby traffic from adsb.fi, and sends the radar
 scene through the supported controller-port serial adapter.
 
@@ -35,7 +35,7 @@ complete a pause handshake. Enter the new code and press Start.
 
 If the entire server process is stopped or restarted while the ROM is already
 on the scope or `LINK WAITING`, reload the ROM before starting a new session.
-Cold recovery from that state is not supported in this beta.
+Cold recovery from that state is not supported yet.
 
 ## Portable Python source
 

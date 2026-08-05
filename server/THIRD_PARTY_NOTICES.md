@@ -1,6 +1,6 @@
 # Third-party notices
 
-NES Radar Server 0.3-beta1 uses the pinned traffic filtering and geometry code
+NES Radar Server 0.3.1 uses the pinned traffic filtering and geometry code
 from C64U Radar commit `dab67473cbe487dd03b3dd5ca8d803a8572bad56`, distributed
 under GPL-3.0. Its unmodified source is included at
 `src/c64_reference/ultimate_radar_server.py`; the license is at

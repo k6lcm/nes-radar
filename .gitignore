@@ -1,0 +1,10 @@
+# Build output. The shipped ROM and server packages live in executables/;
+# everything a local `make` or release build produces is disposable.
+nes_radar/build/
+nes_radar/*.nes
+server/artifacts/
+
+# Python and macOS scratch
+__pycache__/
+*.pyc
+.DS_Store

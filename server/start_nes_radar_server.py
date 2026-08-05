@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Source launcher for NES Radar Server 0.3-beta1."""
+"""Source launcher for NES Radar Server 0.3.1."""
 
 from pathlib import Path
 import runpy

@@ -21,7 +21,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 RELEASE = PROJECT / "artifacts"
 SPEC = PROJECT / "packaging" / "nes-radar-server.spec"
 VERSION = (PROJECT / "VERSION").read_text(encoding="utf-8").strip()
-PRODUCT = f"NES-Radar-Server-{VERSION}"
+PRODUCT = f"NES-Radar-{VERSION}"
 PORTABLE_FILES = (
     "README.md",
     "THIRD_PARTY_NOTICES.md",
