@@ -99,21 +99,34 @@ This wiring was accepted on an **NTSC** NES. Some PAL consoles have additional p
 
 ### macOS
 
-The macOS build is a self-contained Universal 2 binary — it carries its own Python and pyserial, so there's nothing to install. It is ad-hoc signed but **not notarized**, so macOS will warn you about it.
+The macOS build is a self-contained Universal 2 binary — it carries its own Python and pyserial, so there's nothing to install.
+
+Unzip it and start the launcher:
 
 ```
 cd NES-Radar-0.3.1-macos-universal
-xattr -dr com.apple.quarantine .
 ./start_nes_radar_server.command
 ```
 
-The `xattr` line clears the quarantine flag macOS puts on files downloaded from the web. Do it only after checking your download against `SHA256SUMS`. If you'd rather not, first try opening the launcher normally, then use **System Settings → Privacy & Security → Open Anyway** if macOS blocks it.
+You can also just double-click `start_nes_radar_server.command` in Finder.
+
+The build is ad-hoc signed but **not notarized**, so the first launch is blocked with a warning about an unidentified developer. Open **System Settings → Privacy & Security**, find the message about `nes-radar-server`, and click **Open Anyway**. You only do this once — after that the launcher starts normally.
 
 Sanity check before wiring anything up:
 
 ```
-./nes-radar-server --self-test
+./start_nes_radar_server.command --self-test
 ```
+
+Start through the launcher rather than running `nes-radar-server` directly. It passes your arguments straight through, and it keeps you on the copy macOS has already approved.
+
+If you would rather clear the warning up front, this removes the quarantine flag macOS puts on files downloaded from the web:
+
+```
+xattr -dr com.apple.quarantine .
+```
+
+Do that only after checking your download against `SHA256SUMS`.
 
 ### Windows and Linux
 
