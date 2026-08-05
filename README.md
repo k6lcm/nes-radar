@@ -28,10 +28,10 @@ An **FT232R-compatible** adapter is what this project is tested against. The ser
 
 ## Wiring
 
-### Get a 5 V TTL cable
-
 > [!CAUTION]
 > Connect your vintage NES to your modern computer **at your own risk**. The authors of this project are not responsible for damage caused by this experimental project.
+
+### Get a 5 V TTL cable
 
 Use a **5 V USB-to-TTL serial cable**. The recommended reproducible part is the genuine [FTDI `TTL-232R-5V-WE`](https://ftdichip.com/products/ttl-232r-5v-we/), which uses the wire colors below. Hardware acceptance for this project was done with a **DTECH DT-6555** 5 V TTL cable (FT232RL-compatible), whose idle TX was measured at **5.192 V**. Others may work but use at your own risk.
 
