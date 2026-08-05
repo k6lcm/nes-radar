@@ -46,6 +46,13 @@ from nes_icao_request import (
 
 BAUD = 9600
 APP_VERSION = "0.3.1"
+
+# The pinned C64U Radar module identifies its own project in outgoing requests,
+# so without this every adsb.fi call from NES Radar would be attributed to the
+# Commodore 64 program.  Override the header here rather than in the vendored
+# file, which THIRD_PARTY_NOTICES.md declares to be unmodified upstream source.
+# Carries no version: the header should not need revisiting on every release.
+C64.USER_AGENT = "NES-Radar (+https://github.com/k6lcm/nes-radar)"
 DEFAULT_BYTE_GUARD_SECONDS = 0.005
 DEFAULT_POLL_SECONDS = 8.0
 DEFAULT_SCENE_INTERVAL_SECONDS = 9.500
