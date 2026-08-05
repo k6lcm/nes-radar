@@ -29,7 +29,7 @@ An **FT232R-compatible** adapter is what this project is tested against. The ser
 ## Wiring
 
 > [!CAUTION]
-> Connect your vintage NES to your modern computer **at your own risk**. The authors of this project are not responsible for damage caused by this experimental project.
+> Connect your vintage NES to your modern computer **at your own risk**. The authors are not responsible for damage caused by this experimental project.
 
 ### Get a 5 V TTL cable
 
