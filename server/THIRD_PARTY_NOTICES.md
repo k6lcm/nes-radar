@@ -1,10 +1,15 @@
 # Third-party notices
 
-NES Radar Server 0.3.1 uses the pinned traffic filtering and geometry code
-from C64U Radar commit `dab67473cbe487dd03b3dd5ca8d803a8572bad56`, distributed
-under GPL-3.0. Its unmodified source is included at
-`src/c64_reference/ultimate_radar_server.py`; the license is at
-`licenses/GPL-3.0.txt`.
+NES Radar Server 0.3.1 uses the traffic filtering and geometry code from C64U
+Radar commit `dab67473cbe487dd03b3dd5ca8d803a8572bad56`, distributed under
+GPL-3.0, included at `src/c64_reference/ultimate_radar_server.py`; the license
+is at `licenses/GPL-3.0.txt`.
+
+That upstream file is a complete standalone C64 radar server. It was reduced on
+2026-08-05 to the subset NES Radar needs, dropping the Commodore-specific half:
+the TCP service, wire format, Ultimate-64 LAN push, command-line interface, and
+airport-CSV loader. No code was rewritten, only omitted, so every definition
+that remains still matches the upstream file line-for-line.
 
 Binary builds include pySerial 3.5, distributed under the BSD 3-Clause
 license at `licenses/pyserial-BSD.txt`.
