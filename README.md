@@ -178,7 +178,3 @@ The README inside each download repeats the limitations relevant to that package
 | `nes_radar/` | The buildable 0.3.1 NES ROM source, build files, protocol documentation, and required runtime assets. |
 | `server/` | The 0.3.1 Python server source, launchers, and native packaging files. |
 | `executables/` | The hardware-tested ROM, macOS Universal package, portable Python server package, and SHA-256 hashes. |
-
-Internal experiments, historical regression fixtures, generated previews, and
-build environments are retained in the private development archive rather than
-the public repository.
