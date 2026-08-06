@@ -175,6 +175,7 @@ The README inside each download repeats the limitations relevant to that package
 
 | Path | What it is |
 |---|---|
+| [`SIGNALING.md`](SIGNALING.md) | The known-good electrical, timing, framing, packet, and link-ownership contract. |
 | `nes_radar/` | The buildable 0.3.1 NES ROM source, build files, protocol documentation, and required runtime assets. |
 | `server/` | The 0.3.1 Python server source, launchers, and native packaging files. |
 | `executables/` | The hardware-tested ROM, macOS Universal package, portable Python server package, and SHA-256 hashes. |
