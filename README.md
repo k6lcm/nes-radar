@@ -4,7 +4,7 @@
 
 Type any airport's four-letter ICAO code on the NES controller, press Start, and the aircraft actually flying near that airport *right now* appear as moving targets on your TV.
 
-It works for airports worldwide. Point it at your local field and watch the approach traffic line up, or at KLAX and watch it get busy.
+It works for airports worldwide. Point it at your local field and watch the approach traffic line up, or at KLAX and watch it get busy. Watch this quick [video demo](https://youtube.com/shorts/Oe8KoSeiIBw?is=U8YdVTy6Am7p5CTu).
 
 ![NES Radar scope screen](assets/nes-radar-scope.png)
 
