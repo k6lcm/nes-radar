@@ -43,14 +43,14 @@ You can use an old controller cable or purchase a new replacement controller cab
 
 With the NES powered off and USB unplugged, connect to **controller port 2**:
 
-| Cable lead | NES controller port 2 | Connection |
+| FTDI pin | NES controller port 2 | Connection |
 |---|---|---|
-| GND — black | pin 1 — GND | direct |
-| CTS# — brown | pin 3 — OUT0/LATCH | direct |
-| TXD — orange | pin 4 — D0 | **through a 1 kΩ series resistor** |
-| VCC +5 V — red | — | **not connected; insulate** |
-| RXD — yellow | — | not connected; insulate |
-| RTS# — green | — | not connected; insulate |
+| GND | pin 1 — GND | direct |
+| CTS# | pin 3 — OUT0/LATCH | direct |
+| TXD | pin 4 — D0 | **through a 1 kΩ series resistor** |
+| VCC +5V | — | **not connected; insulate** |
+| RXD | — | not connected; insulate |
+| RTS# | — | not connected; insulate |
 
 Plug a normal controller into **port 1** — that's what you use to enter the airport code.
 
