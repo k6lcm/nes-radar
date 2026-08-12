@@ -70,10 +70,8 @@ pin 4 D0   -- |o o| -- pin 7 D4
 > above — not from the back of the connector. See the
 > [NESdev controller port pinout](https://www.nesdev.org/wiki/Controller_port_pinout).
 
-> **Go by signal name, not wire color.** The colors above apply only to the
-> specified FTDI cable. An original Nintendo controller cable uses different
-> colors — including brown for GND — and third-party extension cables may use
-> anything. Identify NES-side wires by continuity and pin number, never by color
+> **Double check pin continuity. Do not reply on wire color references alone.** NES controller cables all use different
+> colors. Identify NES-side wires by continuity and pin number, never by color
 > alone. See the [NESdev serial cable page](https://www.nesdev.org/wiki/Serial_Cable_Construction).
 
 ### Why each line
