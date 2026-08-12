@@ -33,7 +33,7 @@ An **FT232R-compatible** adapter is what this project is tested against. The ser
 
 ### Get a 5 V TTL cable
 
-Use a **5 V USB-to-TTL serial cable**. The recommended reproducible part is the genuine [FTDI `TTL-232R-5V-WE`](https://ftdichip.com/products/ttl-232r-5v-we/), which uses the wire colors below. Hardware acceptance for this project was done with a **DTECH DT-6555** 5 V TTL cable (FT232RL-compatible), whose idle TX was measured at **5.192 V**. Others may work but use at your own risk.
+Use a **5 V USB-to-TTL serial cable**. The recommended reproducible part is the genuine [FTDI `TTL-232R-5V-WE`](https://ftdichip.com/products/ttl-232r-5v-we/). Hardware acceptance for this project was done with a **DTECH DT-6555** 5 V TTL cable (FT232RL-compatible), whose idle TX was measured at **5.192 V**. Others may work but use at your own risk.
 
 **Do not use a 3.3 V adapter.** Its 3.3 V TX output is not a reliably guaranteed logic high for every 5 V NES input buffer. A genuine FTDI `TTL-232R-3V3` has 5 V-tolerant inputs but it may not drive the NES reliably. The USB ID `0403:6001` identifies the FT232R family; it does **not** tell you whether a cable is 3.3 V or 5 V.
 
