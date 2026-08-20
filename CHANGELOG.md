@@ -17,6 +17,8 @@
   leaves the last complete scene up.
 - `ERROR` shows the receiver's own numeric reason as `ERROR 1` through
   `ERROR 5` (framing, header, CRC, record validation, sequence).
+- Source and native server builds carry a pinned Certifi CA bundle for HTTPS;
+  users do not need to install certificates or set `SSL_CERT_FILE`.
 - macOS Universal binary rebuilt with python.org's Python 3.14.7.
 
 ## 0.3.1

@@ -109,7 +109,8 @@ This wiring was accepted on an **NTSC** NES. Some PAL consoles have additional p
 
 ### macOS
 
-The macOS build is a self-contained Universal 2 binary — it carries its own Python and pyserial, so there's nothing to install.
+The macOS build is a self-contained Universal 2 binary — it carries its own
+Python, pyserial, and HTTPS certificate bundle, so there's nothing to install.
 
 Unzip it and start the launcher:
 
@@ -143,17 +144,28 @@ Do that only after checking your download against `SHA256SUMS`.
 There is no prebuilt binary for Windows or Linux — both run from the Python source package, which needs:
 
 - **Python 3.9 or newer**
-- **pyserial 3.5** — `pip install -r requirements.txt`
+- The pinned packages in `requirements.txt`: **pyserial 3.5** for the USB
+  adapter and **Certifi** for HTTPS certificate validation
 
-pyserial is what talks to the USB adapter, so the server won't start without it. The macOS binary has it baked in; the source package does not.
+Install them in a virtual environment so the source package works with
+distribution-managed Python installations, including Homebrew Python:
 
 ```
 # Windows
+python -m venv .venv
+.venv\Scripts\activate.bat
+python -m pip install -r requirements.txt
 start_nes_radar_server.bat
 
 # Linux
-python3 start_nes_radar_server.py
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.txt
+python start_nes_radar_server.py
 ```
+
+The macOS binary carries Python, pyserial, and the CA bundle; binary users
+install none of these separately.
 
 Real-hardware acceptance has been done on macOS. Treat Windows and Linux as the experimental path.
 

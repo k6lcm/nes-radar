@@ -8,14 +8,17 @@ from dataclasses import dataclass
 from enum import Enum, auto
 import json
 import math
+import os
 from pathlib import Path
 import queue
 import signal
+import ssl
 import sys
 import threading
 import time
 from typing import Callable, Iterable, Mapping
 
+import certifi
 import serial
 from serial.tools import list_ports
 from c64_reference import ultimate_radar_server as C64
@@ -44,6 +47,13 @@ from nes_icao_request import (
 )
 from nes_uart_request import ReverseUartReader
 
+
+CERTIFICATE_BUNDLE = Path(certifi.where()).resolve()
+# Python distributions do not agree on where trusted CA certificates live,
+# and frozen macOS applications cannot rely on the build machine's OpenSSL
+# path existing on the user's Mac. Use the bundled Certifi roots by default,
+# while preserving an explicit administrator-provided SSL_CERT_FILE override.
+os.environ.setdefault("SSL_CERT_FILE", str(CERTIFICATE_BUNDLE))
 
 BAUD = 9600
 APP_VERSION = "0.4.3"
@@ -554,6 +564,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def self_test() -> int:
     """Exercise the frozen resources and protocol without external I/O."""
+    if not CERTIFICATE_BUNDLE.is_file():
+        raise RuntimeError(f"bundled CA certificate file is missing: {CERTIFICATE_BUNDLE}")
+    configured_bundle = os.environ.get("SSL_CERT_FILE")
+    if not configured_bundle or not Path(configured_bundle).is_file():
+        raise RuntimeError(f"configured CA certificate file is missing: {configured_bundle}")
+    try:
+        tls_context = ssl.create_default_context()
+    except (OSError, ssl.SSLError) as error:
+        raise RuntimeError(f"could not load trusted CA certificates: {error}") from error
+    if not tls_context.get_ca_certs():
+        raise RuntimeError("trusted CA certificate store is empty")
     if resolve_airport("KSBA") != (34.4262, -119.8404):
         raise RuntimeError("bundled KSBA override is invalid")
     latitude, longitude = resolve_airport("EGLL")

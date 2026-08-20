@@ -15,11 +15,24 @@ The binary is ad-hoc signed but not notarized, so the first launch is
 blocked. Open **System Settings → Privacy & Security**, find the message
 about `nes-radar-server`, and click **Open Anyway**. Once, then normal.
 
-**Portable Python** (Windows, Linux). Needs Python 3.9+ and pyserial 3.5:
+**Portable Python** (Windows, Linux, or source development on macOS). Needs
+Python 3.9+. Install the pinned runtime dependencies in a virtual environment;
+this also works with Homebrew's externally managed Python:
 
 ```text
-python3 -m pip install -r requirements.txt
-python3 start_nes_radar_server.py
+# macOS or Linux
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.txt
+python start_nes_radar_server.py
+```
+
+```text
+# Windows Command Prompt
+python -m venv .venv
+.venv\Scripts\activate.bat
+python -m pip install -r requirements.txt
+python start_nes_radar_server.py
 ```
 
 The `.command` and `.bat` launchers just pass arguments through to the
@@ -37,7 +50,9 @@ The chunked-send defaults (`--chunk-bytes 8`, `--chunk-gap 0.030`) are what
 the V0.4.3 ROM expects; leave them alone unless you know why you'd change
 them.
 
-Stop with Ctrl-C. Needs outbound HTTPS to `opendata.adsb.fi`.
+Stop with Ctrl-C. Needs outbound HTTPS to `opendata.adsb.fi`. Native builds
+carry their own trusted CA certificate bundle; users do not need to install
+Python certificates or set `SSL_CERT_FILE`.
 
 ## More
 
