@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.4
+
+- Keep the existing paired 16×16 aircraft sprite-priority rotation moving
+  during `LINK RECEIVING`. The server sends a one-byte display heartbeat only
+  in the known idle interval before the next packet; sprite artwork and scene
+  data are unchanged.
+
 ## 0.4.3
 
 - Reverse channel is now 9,600 8N1 UART on OUT0, read on the host as RXD.

@@ -21,6 +21,7 @@ DMC_FREQ  = $4010
 APUSTATUS = $4015
 
 MARKER            = $A5
+OAM_HEARTBEAT     = $5A
 PACKET_TYPE_SCENE = $01
 PACKET_TYPE_IDENTITY = $02
 PACKET_TYPE_LOCATION = $03
@@ -401,8 +402,11 @@ uart_frame:      .res UART_FRAME_BYTES
     bcc :+
     jmp @framing_error
 :
-    cmp #MARKER
-    bne @seek_marker               ; harmless noise before a marker
+    ; This is one byte larger than the original CMP/BNE marker check. The
+    ; equal-only branch into @payload_start below saves that byte back so the
+    ; address-sensitive receiver does not move.
+    jsr dispatch_marker
+    bcc @seek_marker
 
     ; The marker is byte 1 of the packet and does not come through
     ; receive_byte_with_controller, so seed the count rather than zero it.
@@ -465,7 +469,7 @@ uart_frame:      .res UART_FRAME_BYTES
     adc temp                       ; count * 9
     cmp packet_length
     bne @header_error
-    jmp @payload_start
+    beq @payload_start              ; equality is known; one byte under JMP
 
 @non_scene_header:
     cmp #PACKET_TYPE_IDENTITY
@@ -1439,10 +1443,11 @@ uart_frame:      .res UART_FRAME_BYTES
     rts
 .endproc
 
-; A legal zero-record identity packet is used as a short controller/display
-; heartbeat. The last scene payload is still resident because the heartbeat
-; has no payload. Every heartbeat advances OAM priority so overloaded 16x16
-; markers flicker rather than leaving the same halves persistently absent.
+; Advance display work during the receive phase. The host can invoke this with
+; the one-byte OAM_HEARTBEAT marker while the ROM is seeking a packet, and a
+; legal zero-record identity packet retains the same behavior. The last scene
+; payload is still resident. Every heartbeat advances OAM priority so
+; overloaded 16x16 markers keep flickering instead of freezing in one state.
 .proc service_control_heartbeat
     lda active_slots
     beq @done
@@ -3100,6 +3105,23 @@ uart_frame:      .res UART_FRAME_BYTES
     rts
 .endproc
 
+; Classify a byte returned by the marker hunt without moving any of the
+; address-sensitive receive code. Carry set means a packet marker; carry clear
+; means harmless noise or a completed display heartbeat.
+.proc dispatch_marker
+    cmp #MARKER
+    beq @packet
+    cmp #OAM_HEARTBEAT
+    bne @resume_seek
+    jsr service_control_heartbeat
+@resume_seek:
+    clc
+    rts
+@packet:
+    sec
+    rts
+.endproc
+
 .segment "BANKDATA"
 chr_bank_values:
     .byte $00, $01, $02, $03
@@ -3115,12 +3137,12 @@ splash_title:
     .byte VER_N, VER_E, VER_S, VER_SPACE, VER_R, VER_A, VER_D, VER_A, VER_R
 SPLASH_TITLE_LENGTH = * - splash_title
 
-; "V0.4.3" -- the release version. Bump this, README.md, server/VERSION,
+; "V0.4.4" -- the release version. Bump this, README.md, server/VERSION,
 ; APP_VERSION in nes_radar_server.py, and start_nes_radar_server.py's
 ; docstring together. The splash stamp is the only way to tell what is on
 ; a cartridge or in a .nes file once it is out of context.
 version_stamp:
-    .byte VER_V, VER_0 + 0, VER_DOT, VER_0 + 4, VER_DOT, VER_0 + 3
+    .byte VER_V, VER_0 + 0, VER_DOT, VER_0 + 4, VER_DOT, VER_0 + 4
 VERSION_STAMP_LENGTH = * - version_stamp
 
 .segment "RODATA"

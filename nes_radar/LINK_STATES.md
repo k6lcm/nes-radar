@@ -39,6 +39,12 @@ situations:
 - **Taking bytes.** The host holds a 30 ms gap after every eighth packet
   byte and the ROM repaints there, about every 73 ms.
 
+While no packet is in flight, the host sends a one-byte display heartbeat
+every 25 ms. Each heartbeat advances the same OAM-priority rotation used in
+`IDLE`, so the unchanged two-sprite aircraft do not freeze at one overflow
+priority while the link says `RECEIVING`. The heartbeat changes no scene data
+and stops before the next packet marker.
+
 The state changes at the window boundary rather than at the first start
 bit, so the one to three seconds spent waiting for the packet sit inside
 `RECEIVING` along with the packet. The ROM cannot repaint this field

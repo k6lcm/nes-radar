@@ -92,6 +92,19 @@ The server's `--chunk-bytes` and `--chunk-gap` control this and default to
 it can drop packet bytes and surface as CRC failure whenever controller
 work consumes the missing gap.
 
+### Receive-phase display heartbeat
+
+After the 360-field display window, the host sends byte `$5A` by itself at
+25 ms intervals while waiting for the next scene deadline. The ROM recognizes
+it only while seeking a packet marker; it advances the existing OAM-priority
+rotation and returns to the marker hunt. The byte is not a packet, carries no
+traffic data, and does not reset link age or scene freshness.
+
+The 25 ms quiet time after each heartbeat covers a worst-case wait for vblank
+and the OAM DMA. Heartbeats stop before the next `$A5` packet marker. This keeps
+the unchanged paired 16×16 aircraft markers flickering during `RECEIVING`
+instead of freezing at one sprite-overflow priority.
+
 ## Scene packet `$01`
 
 The compact scene packet is at most 81 bytes. Each nine-byte record is:

@@ -115,7 +115,7 @@ Python, pyserial, and HTTPS certificate bundle, so there's nothing to install.
 Unzip it and start the launcher:
 
 ```
-cd NES-Radar-0.4.3-macos-universal
+cd NES-Radar-0.4.4-macos-universal
 ./start_nes_radar_server.command
 ```
 
@@ -179,8 +179,8 @@ Real-hardware acceptance has been done on macOS. Treat Windows and Linux as the 
 
 **Reading the link.** The `LINK` field shows what the connection is doing.
 
-- `LINK IDLE` — a fresh scene was accepted and the ROM is displaying it. This is the only state that starts sprite-flicker rotation.
-- `LINK RECEIVING` — the display window is over and the ROM is listening for the next packet. The controller works here.
+- `LINK IDLE` — a fresh scene was accepted and the ROM is displaying it. Sprite-priority rotation starts here.
+- `LINK RECEIVING` — the display window is over and the ROM is listening for the next packet. The controller works here, and host display heartbeats keep the same paired-sprite rotation moving.
 - `LINK WAITING` — ten seconds have passed without a valid packet, or the host marked its data stale. The last scene stays on screen; the `LINK` field is what tells you it's old.
 - `LINK ERROR 1` … `ERROR 5` — the receiver's reason for rejecting the last packet. Plain unnumbered `LINK ERROR` is different: it means the server accepted a scene but flagged the upstream data as bad. See [`nes_radar/LINK_STATES.md`](nes_radar/LINK_STATES.md) for the meanings.
 

@@ -135,6 +135,20 @@ is deliberate: detecting a long gap would mean changing the start-bit hunt
 inside `receive_byte`, and that routine's sampling phase is hardware-proven
 and fails silently when disturbed.
 
+### Receive-phase display heartbeat
+
+Once the protected 360-field display window and four display commits have
+finished, the server uses otherwise idle time before the next scene to send a
+single `$5A` byte every 25 ms. This byte is outside the `$A5` packet envelope.
+The ROM accepts it only in the marker hunt, advances the existing paired-sprite
+OAM priority once, and resumes listening. No sprite pattern, position, traffic
+record, sequence state, freshness state, or CRC packet is changed.
+
+The server leaves 25 ms after every display heartbeat, covering the ROM's
+worst-case vblank wait and OAM DMA, and stops heartbeats before the next packet
+deadline. A legacy ROM safely ignores `$5A` as pre-marker noise; the animation
+improvement requires the matching ROM and server.
+
 Cost, measured on the reference host: a 72-byte scene goes from 0.394 s to
 0.589 s and a 209-byte identity packet from 1.130 s to 1.788 s. In exchange
 the selection repaints about every 73 ms during reception.
@@ -415,7 +429,8 @@ Four link states are visible in the `LINK` field:
   was not marked stale, and the ROM is inside its display window.
 - `RECEIVING`: the display window has expired and the ROM is listening to
   the wire. The controller works here, serviced from the chunk gaps and
-  from the marker hunt.
+  from the marker hunt. Host display heartbeats keep the ordinary OAM-priority
+  rotation moving without changing the paired aircraft sprites.
 - `WAITING`: startup, an accepted upstream-stale scene, or ten seconds
   without any valid packet. Only the scene sequence state is cleared; the
   last complete scene stays on screen.

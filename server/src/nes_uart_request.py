@@ -1,7 +1,7 @@
 """Decode the NES reverse channel: 9,600 8N1 bit-banged by the ROM on OUT0
 and read as ordinary UART data on the host's RXD.
 
-This is the only reverse-channel decoder as of 0.4.3. Shared types
+This is the only reverse-channel decoder as of 0.4.4. Shared types
 (LocationRequest, PauseRequest, RequestCancelled, marker/check constants)
 live in nes_icao_request.py so verify_frame_bytes.py and the request-shape
 tests keep working against one source of truth.

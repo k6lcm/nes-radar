@@ -56,7 +56,7 @@ CERTIFICATE_BUNDLE = Path(certifi.where()).resolve()
 os.environ.setdefault("SSL_CERT_FILE", str(CERTIFICATE_BUNDLE))
 
 BAUD = 9600
-APP_VERSION = "0.4.3"
+APP_VERSION = "0.4.4"
 
 # The pinned C64U Radar module identifies its own project in outgoing requests,
 # so without this every adsb.fi call from NES Radar would be attributed to the
@@ -82,6 +82,8 @@ DEFAULT_CHUNK_BYTES = 8
 DEFAULT_CHUNK_GAP_SECONDS = 0.030
 DEFAULT_POLL_SECONDS = 8.0
 DEFAULT_SCENE_INTERVAL_SECONDS = 9.500
+OAM_HEARTBEAT = b"\x5A"
+OAM_HEARTBEAT_GAP_SECONDS = 0.025
 # Shortened from 448 when chunked reception arrived, and it must stay equal to
 # DISPLAY_WINDOW_FRAMES in nes/nes_radar_scope_v3.s. The window used to be the
 # only time the controller did anything. Now the pad also works between chunks,
@@ -89,6 +91,7 @@ DEFAULT_SCENE_INTERVAL_SECONDS = 9.500
 DISPLAY_WINDOW_FRAMES = 360
 NES_FIELD_HZ = 60.0
 DISPLAY_SCHEDULING_MARGIN_SECONDS = 0.050
+DISPLAY_COMMIT_FRAMES = 4
 DEFAULT_ICAO = "KSBA"
 DEFAULT_RANGE_NM = 9.0
 IDENTITY_SETTLE_SECONDS = 0.050
@@ -626,6 +629,50 @@ def control_heartbeat(sequence: int) -> bytes:
     return encode_identity(sequence, ())
 
 
+def write_oam_heartbeat(
+    port: serial.Serial,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Advance receive-phase sprite priority without starting a packet.
+
+    The ROM recognizes this byte only while seeking the next packet marker.
+    The following quiet gap covers its worst-case vblank wait and OAM DMA.
+    """
+    try:
+        port.write(OAM_HEARTBEAT)
+        port.flush()
+    except SERIAL_IO_ERRORS as error:
+        raise SerialTransportError("serial write", error) from error
+    sleep(OAM_HEARTBEAT_GAP_SECONDS)
+
+
+def wait_with_oam_heartbeats(
+    port: serial.Serial,
+    request_monitor: LocationRequestMonitor | None,
+    scene_deadline: float,
+    heartbeat_start: float,
+    *,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Wait for the next scene while keeping paired markers rotating."""
+
+    def wait_until(deadline: float) -> None:
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            return
+        if request_monitor is None:
+            sleep(remaining)
+        else:
+            wait_for_location_change(request_monitor, remaining)
+
+    wait_until(min(heartbeat_start, scene_deadline))
+    while monotonic() + OAM_HEARTBEAT_GAP_SECONDS < scene_deadline:
+        wait_for_location_change(request_monitor, 0)
+        write_oam_heartbeat(port, sleep)
+    wait_until(scene_deadline)
+
+
 def clear_packets(sequence: int) -> tuple[bytes, bytes]:
     identities = tuple(Identity(slot, "", "") for slot in range(MAX_TARGETS))
     return (
@@ -729,17 +776,20 @@ def stream_scope(
     sequence = args.sequence
     frame = 0
     scene_deadline = monotonic()
+    heartbeat_start = scene_deadline
     refresh_deadline = scene_deadline + args.poll
     identity_pending = assigned.identity_changed
     try:
         while args.frames == 0 or frame < args.frames:
             if frame:
-                remaining = scene_deadline - monotonic()
-                if remaining > 0:
-                    if request_monitor is None:
-                        sleep(remaining)
-                    else:
-                        wait_for_location_change(request_monitor, remaining)
+                wait_with_oam_heartbeats(
+                    port,
+                    request_monitor,
+                    scene_deadline,
+                    heartbeat_start,
+                    monotonic=monotonic,
+                    sleep=sleep,
+                )
             wait_for_location_change(request_monitor, 0)
             now = monotonic()
             if now >= refresh_deadline:
@@ -769,6 +819,11 @@ def stream_scope(
             print(
                 f"Transmitting scene {frame + 1} seq=${sequence:02X} bytes={len(scene_packet)}",
                 flush=True,
+            )
+            heartbeat_start = (
+                monotonic()
+                + (DISPLAY_COMMIT_FRAMES + DISPLAY_WINDOW_FRAMES) / NES_FIELD_HZ
+                + DISPLAY_SCHEDULING_MARGIN_SECONDS
             )
             sequence = (sequence + 1) & 0xFF
             frame += 1

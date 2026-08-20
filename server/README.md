@@ -1,6 +1,6 @@
-# NES Radar Server 0.4.3
+# NES Radar Server 0.4.4
 
-Paired with the NES Radar V0.4.3 ROM.
+Paired with the NES Radar V0.4.4 ROM.
 
 ## Run it
 
@@ -43,12 +43,16 @@ server.
 ```text
 --self-test    offline packaging check; run before wiring anything up
 --help         all flags, including --port and the chunked-send controls
---version      prints 0.4.3
+--version      prints 0.4.4
 ```
 
 The chunked-send defaults (`--chunk-bytes 8`, `--chunk-gap 0.030`) are what
-the V0.4.3 ROM expects; leave them alone unless you know why you'd change
+the V0.4.4 ROM expects; leave them alone unless you know why you'd change
 them.
+
+The matching server also sends one-byte display heartbeats in the idle part of
+`LINK RECEIVING`. They keep the ROM's existing paired-sprite priority rotation
+moving and stop before the next traffic packet.
 
 Stop with Ctrl-C. Needs outbound HTTPS to `opendata.adsb.fi`. Native builds
 carry their own trusted CA certificate bundle; users do not need to install
