@@ -23,6 +23,7 @@ from c64_reference import ultimate_radar_server as C64
 from scene_protocol import (
     ALT_INVALID,
     IDENTITY_CHARACTERS,
+    IDENTITY_RECORD_SIZE,
     MAX_TARGETS,
     RECORD_SIZE,
     SCENE_STALE,
@@ -40,12 +41,12 @@ from nes_icao_request import (
     LocationRequest,
     PauseRequest,
     RequestCancelled,
-    wait_for_link_event,
 )
+from nes_uart_request import ReverseUartReader
 
 
 BAUD = 9600
-APP_VERSION = "0.3.1"
+APP_VERSION = "0.4.3"
 
 # The pinned C64U Radar module identifies its own project in outgoing requests,
 # so without this every adsb.fi call from NES Radar would be attributed to the
@@ -54,9 +55,28 @@ APP_VERSION = "0.3.1"
 # Carries no version: the header should not need revisiting on every release.
 C64.USER_AGENT = "NES-Radar (+https://github.com/k6lcm/nes-radar)"
 DEFAULT_BYTE_GUARD_SECONDS = 0.005
+# After every DEFAULT_CHUNK_BYTES bytes of a packet the host holds a longer
+# quiet gap. It is the only moment inside a packet when the ROM can afford to
+# wait for vblank and repaint, so it is what makes the controller work during
+# reception instead of only between packets.
+#
+# The gap has to clear the ROM's worst case, which is a vblank wait of one full
+# frame at 16.7 ms plus the write, near 18 ms. 30 ms leaves about 12 ms spare.
+#
+# The released ROM services controller work in these gaps. Running with
+# --chunk-bytes 0 is unsupported: when a service commits a directional
+# repaint, the following packet byte can be lost and the packet fails CRC.
+# Without pending controller work the service returns quickly enough to fit
+# inside the 5 ms byte guard, but do not rely on that.
+DEFAULT_CHUNK_BYTES = 8
+DEFAULT_CHUNK_GAP_SECONDS = 0.030
 DEFAULT_POLL_SECONDS = 8.0
 DEFAULT_SCENE_INTERVAL_SECONDS = 9.500
-DISPLAY_WINDOW_FRAMES = 448
+# Shortened from 448 when chunked reception arrived, and it must stay equal to
+# DISPLAY_WINDOW_FRAMES in nes/nes_radar_scope_v3.s. The window used to be the
+# only time the controller did anything. Now the pad also works between chunks,
+# and the budget is needed for the chunk gaps.
+DISPLAY_WINDOW_FRAMES = 360
 NES_FIELD_HZ = 60.0
 DISPLAY_SCHEDULING_MARGIN_SECONDS = 0.050
 DEFAULT_ICAO = "KSBA"
@@ -118,17 +138,17 @@ class MonitorPause:
 
 
 class LocationRequestMonitor:
-    """Own one cancellable CTS reader and surface requests or serial failures."""
+    """Own one cancellable reverse-UART reader and surface requests or serial failures."""
 
     def __init__(
         self,
         port,
         *,
-        request_reader: Callable[..., object] = wait_for_link_event,
+        request_reader: Callable[..., object] | None = None,
         join_timeout: float = MONITOR_JOIN_SECONDS,
     ) -> None:
         self.port = port
-        self.request_reader = request_reader
+        self.request_reader = request_reader or ReverseUartReader()
         self.join_timeout = join_timeout
         self.requests: queue.Queue[object] = queue.Queue()
         self.stop_event = threading.Event()
@@ -183,7 +203,7 @@ class LocationRequestMonitor:
                 return None
             if isinstance(item, MonitorFailure):
                 if isinstance(item.error, SERIAL_IO_ERRORS):
-                    raise SerialTransportError("CTS read", item.error) from item.error
+                    raise SerialTransportError("reverse-UART read", item.error) from item.error
                 raise item.error
             if isinstance(item, MonitorActivity):
                 if include_activity:
@@ -448,7 +468,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     location.add_argument(
         "--nes-icao",
         action="store_true",
-        help="wait for the four-letter controller selection on FTDI CTS/OUT0",
+        help="wait for the four-letter controller selection on the reverse-UART channel",
     )
     parser.add_argument("--lon", type=float)
     parser.add_argument("--range", dest="range_nm", type=float, default=DEFAULT_RANGE_NM)
@@ -463,6 +483,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--frames", type=int, default=0, help="zero streams until interrupted")
     parser.add_argument("--sequence", type=lambda value: int(value, 0), default=0)
     parser.add_argument("--byte-guard", type=float, default=DEFAULT_BYTE_GUARD_SECONDS)
+    parser.add_argument(
+        "--chunk-bytes",
+        type=int,
+        default=DEFAULT_CHUNK_BYTES,
+        help="hold a long gap after every N packet bytes so the NES can repaint; "
+             "the released ROM expects 8, so change only when experimenting",
+    )
+    parser.add_argument(
+        "--chunk-gap",
+        type=float,
+        default=DEFAULT_CHUNK_GAP_SECONDS,
+        help="seconds of quiet at each chunk edge; must exceed one NES frame "
+             "plus the repaint, so not much below 0.025",
+    )
     parser.add_argument("--dry-run", action="store_true", help="fetch once without opening serial")
     parser.add_argument("--clear", action="store_true", help="blank all slots and send an empty scene")
     args = parser.parse_args(argv)
@@ -483,8 +517,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--poll must be at least 2 seconds")
     if args.byte_guard < 0.001:
         parser.error("--byte-guard must be at least 0.001 seconds")
+    if args.chunk_bytes < 0:
+        parser.error("--chunk-bytes must not be negative")
+    if args.chunk_bytes and args.chunk_gap < 0.025:
+        parser.error(
+            "--chunk-gap must be at least 0.025 seconds, since the NES spends up "
+            "to one 16.7 ms frame waiting for vblank before it can repaint"
+        )
+    # Worst case for one cycle: an identity packet and a full scene, both paced
+    # byte by byte, plus one long gap at every chunk edge, plus the NES display
+    # window. The identity packet used to be left out of this, which is why the
+    # old figure was optimistic.
+    worst_scene_bytes = 9 + MAX_TARGETS * RECORD_SIZE
+    worst_identity_bytes = 9 + MAX_TARGETS * IDENTITY_RECORD_SIZE
+    packet_bytes = worst_scene_bytes + worst_identity_bytes
+    chunk_edges = 0
+    if args.chunk_bytes:
+        chunk_edges = (worst_scene_bytes // args.chunk_bytes
+                       + worst_identity_bytes // args.chunk_bytes)
     minimum_scene_interval = (
-        (9 + MAX_TARGETS * RECORD_SIZE) * (10 / BAUD + args.byte_guard)
+        packet_bytes * (10 / BAUD + args.byte_guard)
+        + chunk_edges * (args.chunk_gap - args.byte_guard)
         + 4 / NES_FIELD_HZ
         + DISPLAY_WINDOW_FRAMES / NES_FIELD_HZ
         + DISPLAY_SCHEDULING_MARGIN_SECONDS
@@ -518,14 +571,33 @@ def write_packet(
     packet: bytes,
     byte_guard: float,
     sleep: Callable[[float], None] = time.sleep,
+    *,
+    chunk_bytes: int = DEFAULT_CHUNK_BYTES,
+    chunk_gap: float = DEFAULT_CHUNK_GAP_SECONDS,
 ) -> None:
-    for byte in packet:
+    """Write one packet byte by byte, holding a long gap at every chunk edge.
+
+    Both sides count the marker as byte 1, so the gaps fall after packet bytes
+    8, 16, 24 and so on. The ROM counts the same way in
+    receive_byte_with_controller. No gap follows the final byte, where the
+    ROM's own quiet window starts anyway.
+
+    chunk_bytes of 0 disables the chunk gaps. The released ROM expects a
+    match with its own hardcoded CHUNK_BYTES = 8; a mismatch is unsupported
+    and can drop packet bytes when the ROM commits a repaint in the missing
+    gap, surfacing as ERROR 3.
+    """
+    last = len(packet)
+    for index, byte in enumerate(packet, start=1):
         try:
             port.write(bytes((byte,)))
             port.flush()
         except SERIAL_IO_ERRORS as error:
             raise SerialTransportError("serial write", error) from error
-        sleep(byte_guard)
+        if chunk_bytes and index % chunk_bytes == 0 and index != last:
+            sleep(chunk_gap)
+        else:
+            sleep(byte_guard)
 
 
 def control_heartbeat(sequence: int) -> bytes:
@@ -558,9 +630,11 @@ def clear_screen(args: argparse.Namespace) -> int:
         port.break_condition = False
         port.reset_output_buffer()
         time.sleep(LEAD_IN_SECONDS)
-        write_packet(port, identity_packet, args.byte_guard)
+        write_packet(port, identity_packet, args.byte_guard,
+                     chunk_bytes=args.chunk_bytes, chunk_gap=args.chunk_gap)
         time.sleep(IDENTITY_SETTLE_SECONDS)
-        write_packet(port, scene_packet, args.byte_guard)
+        write_packet(port, scene_packet, args.byte_guard,
+                     chunk_bytes=args.chunk_bytes, chunk_gap=args.chunk_gap)
         port.break_condition = False
     print(
         f"Cleared: identity bytes={len(identity_packet)}; scene bytes={len(scene_packet)}; "
@@ -657,7 +731,8 @@ def stream_scope(
 
             if identity_pending:
                 identity_packet = encode_identity(sequence, assigned.identities)
-                write_packet(port, identity_packet, args.byte_guard, sleep)
+                write_packet(port, identity_packet, args.byte_guard, sleep,
+                             chunk_bytes=args.chunk_bytes, chunk_gap=args.chunk_gap)
                 print(
                     f"Transmitting identity seq=${sequence:02X} bytes={len(identity_packet)}",
                     flush=True,
@@ -668,7 +743,8 @@ def stream_scope(
 
             scene_start = monotonic()
             scene_packet = encode_scene(sequence, assigned.targets, scene_flags(snapshot))
-            write_packet(port, scene_packet, args.byte_guard, sleep)
+            write_packet(port, scene_packet, args.byte_guard, sleep,
+                         chunk_bytes=args.chunk_bytes, chunk_gap=args.chunk_gap)
             print(
                 f"Transmitting scene {frame + 1} seq=${sequence:02X} bytes={len(scene_packet)}",
                 flush=True,
@@ -841,6 +917,8 @@ class ConnectionLifecycle:
                     encode_location_result(self.args.sequence, code, False),
                     self.args.byte_guard,
                     self.dependencies.sleep,
+                    chunk_bytes=self.args.chunk_bytes,
+                    chunk_gap=self.args.chunk_gap,
                 )
                 self.dependencies.output(
                     f"ICAO {code} is not in the pinned worldwide cache; transmitted rejection.",
@@ -853,6 +931,8 @@ class ConnectionLifecycle:
                 encode_location_result(self.args.sequence, code, True),
                 self.args.byte_guard,
                 self.dependencies.sleep,
+                chunk_bytes=self.args.chunk_bytes,
+                chunk_gap=self.args.chunk_gap,
             )
             self.dependencies.output(
                 f"ICAO {code} accepted; transmitted location result to the adapter.",
@@ -882,6 +962,8 @@ class ConnectionLifecycle:
             control_heartbeat(self.args.sequence),
             self.args.byte_guard,
             self.dependencies.sleep,
+            chunk_bytes=self.args.chunk_bytes,
+            chunk_gap=self.args.chunk_gap,
         )
         self.dependencies.output(
             "Transmitted editor-pause acknowledgement to the adapter; "
