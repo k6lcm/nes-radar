@@ -27,20 +27,20 @@ Make all connections with the NES powered off and USB unplugged.
 
 | 5 V FTDI lead | NES controller port 2 | Connection |
 |---|---|---|
-| GND (black on the documented FTDI cable) | pin 1, GND | direct |
-| RXD (yellow) | pin 3, OUT0/LATCH | through its own 1 kOhm series resistor |
-| TXD (orange) | pin 4, D0 | through a separate 1 kOhm series resistor |
-| VCC +5 V (red) | none | disconnected and insulated |
-| CTS# (brown) | none | disconnected and insulated |
-| RTS# (green) | none | disconnected and insulated |
+| GND | pin 1, GND | direct |
+| RXD | pin 3, OUT0/LATCH | through its own 1 kOhm series resistor |
+| TXD | pin 4, D0 | through a separate 1 kOhm series resistor |
+| VCC +5 V | none | disconnected and insulated |
+| CTS# | none | disconnected and insulated |
+| RTS# | none | disconnected and insulated |
 
 Two separate 1 kOhm resistors, one in each signal direction. RXD and TXD are
 not joined. A correct cable measures approximately 1 kOhm on each signal and
 approximately 2 kOhm through the two-resistor loop.
 
-Use signal names and continuity, not colors, when the cable differs from the
-documented FTDI part. Controller and extension cable colors are not
-standardized.
+Identify every lead by its signal name and by continuity, never by wire
+color. Serial-adapter and controller-extension cables are not standardized
+on any color scheme.
 
 Electrical facts:
 
