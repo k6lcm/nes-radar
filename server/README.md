@@ -1,62 +1,47 @@
-# NES Radar Server 0.3.1
+# NES Radar Server 0.4.3
 
-This server is paired with the NES Radar 0.3.1 ROM. It receives airport
-codes from the NES, retrieves nearby traffic from adsb.fi, and sends the radar
-scene through the supported controller-port serial adapter.
+Paired with the NES Radar V0.4.3 ROM.
 
-## Quick start
+## Run it
 
-1. Connect the USB serial/NES controller-port interface.
-2. Start the server before pressing Start in the NES airport editor.
-3. Select the intended serial device from the numbered list.
-4. Enter an ICAO code on the NES and press Start.
-
-With no serial devices attached, the server waits and rescans. It lists every
-serial port reported by the operating system, including its description, USB
-VID:PID, and serial number when available. It does not restrict the choice by
-manufacturer or USB ID.
-
-To bypass the device menu, supply an exact port:
+**macOS.** Extract this zip, then double-click `start_nes_radar_server.command`
+or run it from a terminal:
 
 ```text
-nes-radar-server --port /dev/cu.usbserial-EXAMPLE
-nes-radar-server.exe --port COM4
+./start_nes_radar_server.command
 ```
 
-The host needs outbound HTTPS access to `opendata.adsb.fi`. Stop the server
-with Ctrl-C. Use `--help` for all options, `--version` to show the version, and
-`--self-test` for an offline packaging check.
+The binary is ad-hoc signed but not notarized, so the first launch is
+blocked. Open **System Settings → Privacy & Security**, find the message
+about `nes-radar-server`, and click **Open Anyway**. Once, then normal.
 
-## Changing airports
-
-Keep the same server process running. While the scope is active, press Select.
-The return to the ICAO editor takes about one second while the ROM and server
-complete a pause handshake. Enter the new code and press Start.
-
-If the entire server process is stopped or restarted while the ROM is already
-on the scope or `LINK WAITING`, reload the ROM before starting a new session.
-Cold recovery from that state is not supported yet.
-
-## Portable Python source
-
-Python 3.9 or newer is required:
+**Portable Python** (Windows, Linux). Needs Python 3.9+ and pyserial 3.5:
 
 ```text
 python3 -m pip install -r requirements.txt
-python3 start_nes_radar_server.py --self-test
 python3 start_nes_radar_server.py
 ```
 
-On Windows, `py -3` may be used instead of `python3`. The `.command` and `.bat`
-launchers forward command-line arguments after dependencies are installed.
+The `.command` and `.bat` launchers just pass arguments through to the
+server.
 
-The default stream shows aircraft within 9 nautical miles and sends at most
-eight targets. The macOS build is ad-hoc signed, but it is not Developer ID
-signed or notarized. If macOS blocks it, first try opening it normally, then use
-**System Settings → Privacy & Security → Open Anyway**. Hardware acceptance was
-performed with an FT232R-compatible interface; other serial hardware may need
-separate electrical and timing validation.
+## Options
 
-See `THIRD_PARTY_NOTICES.md` and `licenses/` for third-party source and license
-details. `packaging/` and `requirements-build.txt` are retained so native
-executables can be rebuilt from this source tree.
+```text
+--self-test    offline packaging check; run before wiring anything up
+--help         all flags, including --port and the chunked-send controls
+--version      prints 0.4.3
+```
+
+The chunked-send defaults (`--chunk-bytes 8`, `--chunk-gap 0.030`) are what
+the V0.4.3 ROM expects; leave them alone unless you know why you'd change
+them.
+
+Stop with Ctrl-C. Needs outbound HTTPS to `opendata.adsb.fi`.
+
+## More
+
+Full project docs — hardware wiring, protocol, link states, upgrading from
+0.3.1 — live in the repository:
+[k6lcm/nes-radar](https://github.com/k6lcm/nes-radar). Third-party sources
+and licenses are in `licenses/` and `THIRD_PARTY_NOTICES.md`.
