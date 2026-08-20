@@ -1,6 +1,4 @@
 ROM := nes_radar_scope_v3.nes
-RC_ROM := nes_radar_select_pause_handshake_v1.nes
-LEGACY_OUTPUT := nes_radar_0_3_rc2_candidate_v3.nes
 OBJ := build/nes_radar_scope_v3.o
 PRG_IMAGE := build/nes_radar_scope_v3.prg
 CHR_IMAGE := build/nes_radar_scope_v3.chr
@@ -15,7 +13,7 @@ SPLASH_ASSETS := $(SPLASH_DIR)/splash_bg.chr $(SPLASH_DIR)/splash_bg.nam \
 
 .PHONY: all assets hardware-images verify clean
 
-all: $(RC_ROM)
+all: $(ROM)
 
 build:
 	mkdir -p build
@@ -33,17 +31,21 @@ $(ROM): $(OBJ) nes/cnrom256.cfg
 	ld65 -C nes/cnrom256.cfg -o $@ -m build/nes_radar_scope_v3.map \
 		--dbgfile build/nes_radar_scope_v3.dbg $<
 
-$(RC_ROM): $(ROM)
-	cp $(ROM) $(RC_ROM)
-
 $(PRG_IMAGE) $(CHR_IMAGE): $(ROM) tools/split_cnrom.py | build
 	$(PYTHON) tools/split_cnrom.py $(ROM) $(PRG_IMAGE) $(CHR_IMAGE)
 
 hardware-images: $(PRG_IMAGE) $(CHR_IMAGE)
 
-verify: $(ROM) $(RC_ROM) hardware-images
+# The reverse-channel transmit routine is cycle-timed and the bit period
+# depends on its own linked address, because a delay loop straddling a page
+# boundary would silently drop the baud rate from 9600 to 8170. Both
+# verifiers run against the built ROM: verify_tx_timing charges the extra
+# cycle a taken branch pays crossing a page and checks all 256 byte values,
+# and verify_frame_bytes demodulates the ROM's own writes to $4016 and
+# compares them against the server's request_bytes(), so the two sides catch
+# each other disagreeing rather than restating a rule.
+verify: $(ROM) hardware-images
 	test "$$(wc -c < $(ROM) | tr -d ' ')" = "65552"
-	cmp $(ROM) $(RC_ROM)
 	printf 'NES\032\002\004\060\000' | cmp -n 8 - $(ROM)
 	test "$$(wc -c < $(LDV_DIR)/ldv_bg.chr | tr -d ' ')" = "4096"
 	test "$$(wc -c < $(LDV_DIR)/ldv_bg.nam | tr -d ' ')" = "960"
@@ -54,6 +56,8 @@ verify: $(ROM) $(RC_ROM) hardware-images
 	test "$$(wc -c < $(SPLASH_DIR)/splash_bg.palette.bin | tr -d ' ')" = "16"
 	test "$$(wc -c < $(PRG_IMAGE) | tr -d ' ')" = "32768"
 	test "$$(wc -c < $(CHR_IMAGE) | tr -d ' ')" = "32768"
+	$(PYTHON) tools/verify_tx_timing.py $(ROM) build/nes_radar_scope_v3.dbg
+	$(PYTHON) tools/verify_frame_bytes.py $(ROM) build/nes_radar_scope_v3.dbg
 
 clean:
-	rm -rf build $(ROM) $(RC_ROM) $(LEGACY_OUTPUT)
+	rm -rf build $(ROM)

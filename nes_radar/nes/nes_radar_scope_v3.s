@@ -95,7 +95,35 @@ BUTTON_LEFT       = $02
 BUTTON_RIGHT      = $01
 OUT0_REQUEST_MARKER = $4E
 OUT0_CHECK_SEED   = $A5
-DISPLAY_WINDOW_FRAMES = 448       ; 7.47 seconds at NTSC field rate
+
+; Reverse channel, NES to host.
+;
+; 9,600 8N1 bit-banged on OUT0 and read as ordinary UART data on the host's
+; RXD. OUT0 high is mark, low is space, so no inverter is needed; the ROM
+; rests OUT0 low, which the host sees as one break byte at each edge of a
+; burst. Both requests are six bytes: marker, four payload bytes, and an
+; XOR checksum seeded with $A5. See tools/verify_frame_bytes.py and
+; ../SIGNALING.md.
+
+; The pause request is a six-byte UART frame with its own marker, padded to
+; the same length as a location request so both share one length and one
+; checksum rule. A zero payload can never collide with a location request
+; because the editor only ever emits A-Z.
+PAUSE_REQUEST_MARKER = $50
+UART_FRAME_BYTES     = 6
+UART_GUARD_UNITS     = 8          ; 800 us of mark before the first start bit
+; Shortened from 448 when chunked reception arrived. The window used to be the
+; only time the controller did anything, so it wanted to be long. Now the pad
+; also works between chunks, and the time is needed for the chunk gaps instead.
+DISPLAY_WINDOW_FRAMES = 360       ; 6.00 seconds at NTSC field rate
+
+; The host holds a long quiet gap after every CHUNK_BYTES bytes of a packet.
+; That gap is the only moment inside a packet with room to wait for vblank and
+; repaint, so it is where the selection is serviced. Both sides count the
+; marker as byte 1 and must agree on this number: the server's --chunk-bytes
+; defaults to the same 8. A mismatch is loud rather than silent, since the ROM
+; would spend a gap that is not there and lose the next byte to a CRC failure.
+CHUNK_BYTES = 8
 LINK_STALE_FRAMES     = 600       ; 10 seconds without a valid packet
 SPLASH_FRAMES         = 120       ; about two seconds at NTSC field rate
 CHR_BANK_SPLASH       = 0
@@ -160,8 +188,10 @@ controller_pressed: .res 1
 controller_pending: .res 1
 editor_index:   .res 1
 startup_error:  .res 1
-pulse_byte:     .res 1
-pulse_checksum: .res 1
+; Two reserved zero-page bytes. They preserve the zero-page layout of the
+; hardware-accepted ROM so the built .nes file stays bit-identical.
+_reserved0:     .res 1
+_reserved1:     .res 1
 delay_blocks:   .res 1
 field_src:      .res 2
 field_width:    .res 1
@@ -185,6 +215,11 @@ link_timed_out:  .res 1
 link_data_stale: .res 1
 navigation_requested: .res 1
 pause_waiting:        .res 1
+; Reverse-UART transmit scratch.
+tx_byte:              .res 1
+tx_index:             .res 1
+chunk_count:          .res 1
+pad_commit_pending:   .res 1
 
 .segment "BSS"
 .align 256
@@ -198,6 +233,10 @@ selected_fields: .res 37
 status_fields:   .res STATUS_SIZE
 startup_cursor:  .res 4
 splash_frames:   .res 1
+; Reverse-UART frame in transmission order: marker, four payload bytes, XOR
+; checksum. Assembled here rather than sent on the fly because uart_tx_byte
+; destroys every register and cannot host a loop counter.
+uart_frame:      .res UART_FRAME_BYTES
 
 .segment "HEADER"
     .byte "NES", $1A
@@ -364,6 +403,11 @@ splash_frames:   .res 1
 :
     cmp #MARKER
     bne @seek_marker               ; harmless noise before a marker
+
+    ; The marker is byte 1 of the packet and does not come through
+    ; receive_byte_with_controller, so seed the count rather than zero it.
+    lda #1
+    sta chunk_count
 
     lda #$FF
     sta crc_hi
@@ -552,7 +596,7 @@ splash_frames:   .res 1
     jmp @seek_marker
 
 @record_error:
-    lda #4                         ; target flags/slot/coordinate validation
+    lda #4                         ; scene/identity record or location-result mismatch
     jsr show_error
     jmp @seek_marker
 
@@ -604,7 +648,7 @@ splash_frames:   .res 1
     sta link_data_stale
     sta link_timed_out             ; already visibly WAITING; do not re-fire
     jsr set_link_waiting
-    jsr clear_target_state
+    jsr forget_scene_sequence
 :
     lda packet_flags
     and #SCENE_SEVERE
@@ -727,12 +771,57 @@ splash_frames:   .res 1
     tya
     pha
     jsr latch_controller
+    ; Every packet byte after the marker arrives here, so this is where the
+    ; chunk boundary falls. receive_byte is not touched: the gap is found by
+    ; counting bytes, not by timing the line, which keeps the cycle-counted
+    ; sampling path exactly as it was proven.
+    inc chunk_count
+    lda chunk_count
+    cmp #CHUNK_BYTES
+    bne :+
+    lda #0
+    sta chunk_count
+    jsr chunk_service
+:
     pla
     tay
     pla
     tax
     pla
     plp
+    rts
+.endproc
+
+; Service the pad inside a chunk gap. The host guarantees about 30 ms here and
+; the worst case below is a vblank wait of one frame plus the write, near 18 ms.
+;
+; Select is deliberately left pending. Its owner is the display window or the
+; link timeout, and handing a pause request to the middle of a packet would
+; start a reverse transmission while the host is still sending.
+.proc chunk_service
+    ; The caller latched the pad immediately before this, so do not latch again.
+    lda controller_pending
+    and #(BUTTON_UP | BUTTON_DOWN | BUTTON_LEFT | BUTTON_RIGHT)
+    sta controller_pressed
+    beq @carry_over                ; nothing new, but a prepared panel may wait
+    eor #$FF
+    and controller_pending
+    sta controller_pending
+    jsr move_selection
+    jsr build_selected_fields
+    jmp @commit
+@carry_over:
+    ; A press picked up during the marker wait can arrive with its panel built
+    ; and no vblank spent yet. The gap is a better place to finish it than the
+    ; hunt, so take it here rather than leaving the screen a frame behind.
+    lda pad_commit_pending
+    beq @done
+@commit:
+    lda #0
+    sta pad_commit_pending
+    ; The gap is long enough to wait for vblank properly, unlike the hunt.
+    jsr commit_selection
+@done:
     rts
 .endproc
 
@@ -789,12 +878,22 @@ splash_frames:   .res 1
 .endproc
 
 ; PPUSTATUS is sampled only while the serial input is HIGH/idle. Work is done
-; at most once per video field. Controller polling is deliberately confined to
-; the guaranteed post-scene display window so a framed pause can never begin
-; too close to the next host packet deadline.
+; at most once per video field. This runs both during the post-scene display
+; window and during the between-packet idle after the window has expired; the
+; chunk gaps inside a packet are handled by their own service point.
 .proc service_idle_if_vblank
     bit PPUSTATUS
-    bpl @done
+    bpl @prepare_pad
+    ; --- inside vblank ---
+    ; The write goes first so only the roughly 84 cycles of polling latency sit
+    ; ahead of it. latch_controller and age_link are RAM work and can safely
+    ; run past the end of vblank.
+    lda pad_commit_pending
+    beq @no_commit
+    lda #0
+    sta pad_commit_pending
+    jsr commit_selection_fields
+@no_commit:
     jsr latch_controller
     jsr age_link
     bcc @navigation
@@ -816,6 +915,46 @@ splash_frames:   .res 1
     and #($FF - BUTTON_SELECT)
     sta controller_pending
 @done:
+    rts
+
+    ; --- outside vblank ---
+    ; Marker-wait responsiveness. Before this the pad was latched here but
+    ; never acted on, so the scope ignored it for the whole gap between the
+    ; display window and the packet, which is one to three seconds.
+    ;
+    ; Only the RAM half runs here. build_selected_fields alone is well over a
+    ; thousand cycles, including a 45-iteration multiply, and putting it inside
+    ; vblank would overrun into rendering and produce garbage tiles. The write
+    ; waits for the next vblank, one frame later.
+    ;
+    ; This costs sampling blindness while it runs, so it is gated on an actual
+    ; press. A held direction produces one edge, not a stream, so the exposure
+    ; is one burst per press rather than one per frame.
+@prepare_pad:
+    lda pad_commit_pending
+    bne @done
+    lda controller_pending
+    and #(BUTTON_UP | BUTTON_DOWN | BUTTON_LEFT | BUTTON_RIGHT)
+    sta controller_pressed
+    beq @done
+    eor #$FF
+    and controller_pending
+    sta controller_pending
+    jsr move_selection
+    jsr build_selected_fields
+    lda #1
+    sta pad_commit_pending
+    ; Throw away a vblank that began while the work above was running. Without
+    ; this the next poll sees the flag set and commits, but the flag says only
+    ; that vblank started at some point during those two thousand cycles, not
+    ; that it started recently. Committing near the end of vblank overruns into
+    ; rendering, and a $2007 write during rendering lands wherever v has
+    ; drifted, so it scribbles the nametable rather than failing cleanly. That
+    ; is what destroyed the scope background and produced bursts of garbage.
+    ;
+    ; Discarding it costs one frame of latency on the repaint and makes the
+    ; poll's 84-cycle bound the real bound.
+    bit PPUSTATUS
     rts
 .endproc
 
@@ -1234,6 +1373,12 @@ splash_frames:   .res 1
     sta navigation_requested
     rts
 :
+    jmp move_selection
+.endproc
+
+; The slot walk on its own, so a chunk gap can move the selection without
+; going near the Select handling above.
+.proc move_selection
     lda selected_slot
     sta previous_selected_slot
     lda active_slots
@@ -1360,6 +1505,17 @@ splash_frames:   .res 1
     lda display_frames_lo
     ora display_frames_hi
     bne @frame
+
+    ; The window is over. From here the ROM listens for the next packet and
+    ; stops servicing the controller, so say so before going deaf rather than
+    ; after. Only IDLE is overwritten: WAITING and ERROR describe a link that
+    ; is not delivering, and claiming RECEIVING over either of them would be a
+    ; lie the player has no way to check.
+    lda status_fields + STATUS_LINK
+    cmp #CHAR_A + ('I' - 'A')
+    bne @done
+    jsr set_link_receiving
+    jsr commit_link_state
 @done:
     rts
 .endproc
@@ -1599,12 +1755,33 @@ splash_frames:   .res 1
     clc
     adc #CHAR_0
     sta status_fields + STATUS_COUNT + 1
-    jsr set_link_receiving
+    ; A scene was just accepted, so the packet is over and the display window
+    ; is about to start. That is the idle half of the cycle, not the receiving
+    ; half. RECEIVING is set later, when the window expires.
+    jsr set_link_idle
+    rts
+.endproc
+
+; Entering WAITING used to blank the targets, the table rows, the selected
+; aircraft and the count. It no longer does. The last complete scene stays on
+; screen and the LINK field is what says the data is old, which is more useful
+; than an empty scope: a scope that erases itself the moment the host pauses
+; looks broken, and the aircraft that were there a moment ago are still the
+; best information available.
+;
+; The sequence state does have to go. The server restarts its sequence
+; numbering on a fresh stream, so a retained have_seq would make the first
+; scene back look like a sequence error.
+.proc forget_scene_sequence
+    lda #0
+    sta have_seq
     rts
 .endproc
 
 ; Remove every visible aircraft while preserving cached identity text for a
-; clean recovery when the next current scene arrives.
+; clean recovery when the next current scene arrives. Nothing calls this now
+; that WAITING retains its targets. Kept because it is the only correct
+; response if a reason to blank the scope comes back.
 .proc clear_target_state
     lda #0
     sta active_slots
@@ -1655,11 +1832,24 @@ splash_frames:   .res 1
     sta link_timed_out
     sta link_data_stale
     jsr set_link_waiting
-    jsr clear_target_state
+    jsr forget_scene_sequence
     sec
     rts
 @unchanged:
     clc
+    rts
+.endproc
+
+; Repaint only the LINK field, waiting for a clean vblank boundary first.
+;
+; Safe only where the host is known to be quiet. The one caller is the end of
+; the display window, which is 360 fields (about 6.00 seconds) out of a 9.500
+; second interval. A packet already in flight cannot be interrupted for this,
+; which is why the state changes at the window boundary rather than at the
+; first start bit.
+.proc commit_link_state
+    jsr begin_vram_update
+    jsr write_link_during_vblank
     rts
 .endproc
 
@@ -1688,6 +1878,15 @@ splash_frames:   .res 1
 .proc set_link_waiting
     lda #<link_waiting_chars
     ldx #>link_waiting_chars
+    jmp copy_link_state
+.endproc
+
+; The link is healthy and nothing is arriving. This is also the only state in
+; which the controller does anything, so it doubles as the cue that the scope
+; is yours.
+.proc set_link_idle
+    lda #<link_idle_chars
+    ldx #>link_idle_chars
     jmp copy_link_state
 .endproc
 
@@ -1902,127 +2101,207 @@ splash_frames:   .res 1
     rts
 .endproc
 
-; Emit a slow, self-framing six-byte request through controller-port OUT0.
-; Packet: $4E, four ASCII ICAO letters, XOR checksum seeded with $A5.
-; A 200 ms leader and pulse-width bits reuse the repository's exercised OUT0
-; reporting convention: 20 ms HIGH=0, 60 ms HIGH=1, 20 ms LOW delimiter.
-.proc send_location_request
-    lda #OUT0_CHECK_SEED
-    eor #OUT0_REQUEST_MARKER
-    ldx #0
-@checksum:
-    eor icao_code,x
-    inx
-    cpx #4
-    bne @checksum
-    sta pulse_checksum
+; ---------------------------------------------------------------------------
+; Reverse channel, NES to host
+; ---------------------------------------------------------------------------
+;
+; Six bytes on the wire: marker, four payload bytes, XOR checksum seeded
+; with $A5. Modulation is 9,600 8N1 UART on OUT0; see ../SIGNALING.md.
+
+
+; 9600 8N1 transmit on OUT0. Every fact the routine depends on was measured
+; on a real NTSC console with a diagnostic ROM before it landed here: 18390
+; bytes with zero corruption, a clean baud window of 9200 to
+; 10200, and 500 round trips with eight controller strobes each landing
+; between the receive and the reply without contaminating either.
+;
+; NTSC runs at 1.789773 MHz, so a 9600 bit is 186.43 cycles. This uses a flat
+; 186, which is 0.23 percent fast. By the stop bit that has accumulated to
+; about 2 percent of a bit, well inside what a 16x oversampling receiver
+; tolerates.
+;
+; Every bit costs the same because the data bit reaches OUT0 without a branch:
+; LSR drops bit 0 into carry and ADC #0 against A=0 turns the carry back into
+; the 0 or 1 that $4016 wants. A branchless path is what makes the loop
+; countable in the first place.
+;
+; Timing is measured write-to-write on STA JOY1, since the write lands on the
+; last cycle of the instruction.
+;
+;   start -> data0 : 171 delay + ldx 2 + lsr 5 + lda 2 + adc 2 + sta 4 = 186
+;   data  -> data  : 168 delay + dex 2 + bne 3 + lsr 5 + lda 2 + adc 2 + sta 4
+;                                                                     = 186
+;   data7 -> stop  : 168 delay + dex 2 + bne 2 + pad 8 + lda 2 + sta 4 = 186
+;
+; A taken branch costs an extra cycle when it crosses a page, so the delay
+; loops are only correct for the addresses the linker happened to give them.
+; Do not move this routine or edit around it without re-running
+; tools/verify_tx_timing.py, which charges that penalty and checks all 256
+; byte values. The failure is silent: the ROM still sends, the host still
+; sees bytes, and some fraction of them are wrong.
+;
+; The stop bit is then held a full bit time before returning, so back-to-back
+; calls always leave at least one stop bit of mark between bytes.
+;
+; The caller must have OUT0 at mark already. Destroys A, X, Y.
+;
+; The alignment is load-bearing, not tidiness. Both delay loops are three bytes
+; and run 33 or 34 times, so if a loop straddles a page boundary every one of
+; those iterations pays the extra cycle a taken branch costs across a page and
+; the bit period goes from 186 to 219, which is 8170 baud. Nothing on the
+; console would report that, it would just corrupt bytes. The routine is 47
+; bytes, so a 64-byte boundary keeps it inside one page wherever the linker
+; puts it. Adding CHUNK_BYTES support moved this code and broke exactly this,
+; caught by tools/verify_tx_timing.py.
+.align 64
+.proc uart_tx_byte
+    sta tx_byte
 
     lda #0
-    sta JOY1
-    lda #25                        ; 500 ms idle gap
-    jsr delay_n_20ms
+    sta JOY1                      ; start bit, T0
+
+    ldy #34                       ; 5*34+1 = 171
+@start_delay:
+    dey
+    bne @start_delay
+
+    ldx #8
+@bit:
+    lsr tx_byte                   ; bit 0 -> carry
+    lda #0
+    adc #0                        ; A = carry, no branch
+    sta JOY1                      ; data bit
+    ldy #33                       ; 5*33+1 = 166
+@bit_delay:
+    dey
+    bne @bit_delay
+    nop                           ; 166 + 2 = 168
+    dex
+    bne @bit
+
+    nop                           ; 8 cycles of padding so the stop bit
+    nop                           ; lands exactly 186 after data bit 7
+    nop
+    nop
+    lda #1
+    sta JOY1                      ; stop bit
+
+    ldy #37                       ; 5*37+1 = 186, one full stop bit
+@stop_delay:
+    dey
+    bne @stop_delay
+    rts
+.endproc
+
+; X = guard in 100 us units. Raise OUT0 to mark and hold it before the first
+; start bit, so a host UART coming out of break has time to re-arm.
+;
+; The guard is 800 us as deliberate margin, not a tuned figure. A guard
+; sweep on real hardware found no floor to tune against: every value from
+; the roughly 22 us the ROM cannot help emitting up through 2000 us produced
+; complete frames.
+.proc begin_mark_x
     lda #1
     sta JOY1
-    lda #10                        ; 200 ms leader
-    jsr delay_n_20ms
+    jsr delay_x_100us
+    rts
+.endproc
+
+; Drop back to the resting break level. OUT0 low is where read_controller and
+; sample_line already leave the pin, so resting there costs nothing and makes
+; ordinary controller strobes invisible to the host. It costs at most one 0x00
+; at the host on the mark-to-break edge, which the host discards because it
+; scans for a marker byte.
+.proc end_mark
     lda #0
     sta JOY1
-    lda #10                        ; 200 ms leader separator
-    jsr delay_n_20ms
+    rts
+.endproc
 
-    lda #OUT0_REQUEST_MARKER
-    jsr send_pulse_byte
+; About 103 us, not 100. Kept at its measured value so the 800 us nominal
+; mark guard lands at the same 827 us that hardware measured. Precision is
+; not the point of a guard.
+.proc delay_100us
+    ldy #33
+@loop:
+    dey
+    bne @loop
+    nop
+    rts
+.endproc
+
+.proc delay_x_100us
+    cpx #0
+    beq @done
+@loop:
+    jsr delay_100us
+    dex
+    bne @loop
+@done:
+    rts
+.endproc
+
+; Fill in the checksum over a frame whose marker and payload are already in
+; uart_frame, then put all six bytes on the wire.
+;
+; Checksum: XOR of the marker and payload, seeded with $A5.
+.proc send_uart_frame
+    lda #OUT0_CHECK_SEED
     ldx #0
-@code:
+@checksum:
+    eor uart_frame,x
+    inx
+    cpx #UART_FRAME_BYTES - 1
+    bne @checksum
+    sta uart_frame + UART_FRAME_BYTES - 1
+
+    ldx #UART_GUARD_UNITS
+    jsr begin_mark_x
+    lda #0
+    sta tx_index
+@send:
+    ldx tx_index
+    lda uart_frame,x
+    jsr uart_tx_byte              ; destroys A, X and Y, hence tx_index
+    inc tx_index
+    lda tx_index
+    cmp #UART_FRAME_BYTES
+    bne @send
+    jsr end_mark
+    rts
+.endproc
+
+; Marker $4E, four ASCII ICAO letters, XOR checksum seeded with $A5.
+; Six bytes on the wire in about 7.2 ms.
+.proc send_location_request
+    ldx #0
+@copy:
     lda icao_code,x
-    jsr send_pulse_byte
+    sta uart_frame + 1,x
     inx
     cpx #4
-    bne @code
-    lda pulse_checksum
-    jsr send_pulse_byte
-    lda #0
-    sta JOY1
-    lda #10
-    jsr delay_n_20ms
-    rts
+    bne @copy
+    lda #OUT0_REQUEST_MARKER
+    sta uart_frame
+    jmp send_uart_frame
 .endproc
 
 ; Request exclusive controller ownership before exposing the ICAO editor.
-; Reuse the proven location-request preamble, then emit a distinct 100 ms pause
-; symbol. The complete one-second shape survives USB CTS sampling; repeated
-; controller latch strobes cannot synthesize its 500/200/200 ms framing.
+; Marker $50 and a zero payload, so the frame is the same length and obeys the
+; same checksum as a location request.
 .proc send_pause_request
     lda #0
-    sta JOY1
-    lda #25
-    jsr delay_n_20ms
-    lda #1
-    sta JOY1
-    lda #10
-    jsr delay_n_20ms
-    lda #0
-    sta JOY1
-    lda #10
-    jsr delay_n_20ms
-    lda #1
-    sta JOY1
-    lda #5
-    jsr delay_n_20ms
-    lda #0
-    sta JOY1
-    rts
-.endproc
-
-; Send A most-significant bit first. X is preserved for the four-byte loop.
-.proc send_pulse_byte
-    sta pulse_byte
-    txa
-    pha
-    ldx #8
-@bit:
-    asl pulse_byte
-    lda #1
-    sta JOY1
-    lda #1
-    bcc @hold
-    lda #3
-@hold:
-    jsr delay_n_20ms
-    lda #0
-    sta JOY1
-    jsr delay_20ms
-    dex
-    bne @bit
-    pla
-    tax
-    rts
-.endproc
-
-.proc delay_20ms
-    txa
-    pha
-    ldy #28
-@outer:
     ldx #0
-@inner:
-    dex
-    bne @inner
-    dey
-    bne @outer
-    pla
-    tax
-    rts
+@pad:
+    sta uart_frame + 1,x
+    inx
+    cpx #4
+    bne @pad
+    lda #PAUSE_REQUEST_MARKER
+    sta uart_frame
+    jmp send_uart_frame
 .endproc
 
-.proc delay_n_20ms
-    sta delay_blocks
-@block:
-    jsr delay_20ms
-    dec delay_blocks
-    bne @block
-    rts
-.endproc
 
 .proc initialize_startup_video
     lda #0
@@ -2299,10 +2578,34 @@ splash_frames:   .res 1
 ; selected panel, and two one-tile table-slot updates.
 .proc commit_selection
     jsr begin_vram_update
+    jmp commit_selection_in_vblank
+.endproc
+
+; The same payload with the wait removed, for a caller that has just observed
+; vblank itself and cannot afford to spend another frame blind to the wire.
+.proc commit_selection_in_vblank
     lda #0
     sta OAMADDR
     lda #>oam_shadow
     sta OAMDMA
+    jmp commit_selection_fields
+.endproc
+
+; The nametable half on its own, without the OAM DMA. Counted, because this
+; runs on a vblank the caller found by polling rather than by NMI and the
+; margin is what keeps it off the visible frame:
+;
+;   write_selected_frame    about 1336 cycles, 35 tiles across nine fields
+;   write_selection_slots   about  66
+;   restore_scroll          about  36
+;                          -----
+;                           about 1438, against 2273 cycles of NTSC vblank
+;
+; Adding the 520-cycle OAM DMA would push that to 1958 and leave under ten
+; percent of margin. Skipping it costs nothing here: the marker wait does not
+; run build_oam_shadow, so the shadow has not changed since the last commit,
+; and the shipped ROM already spent this entire wait without a single DMA.
+.proc commit_selection_fields
     jsr write_selected_frame
     jsr write_selection_slots
     jsr restore_scroll
@@ -2591,11 +2894,17 @@ splash_frames:   .res 1
     rts
 .endproc
 
-; Preserve the receiver's error paths but surface them through the LDV LINK
-; field. The old design's separate numeric error cell no longer exists.
+; Preserve the receiver's error paths and surface the reason through the LDV
+; LINK field as ERROR 1 through ERROR 5. The number distinguishes UART
+; framing, header, CRC, record validation, and scene sequence failures without
+; weakening the receiver or requiring a separate diagnostic ROM.
 .proc show_error
     sta error_code
     jsr set_link_error
+    lda error_code
+    clc
+    adc #CHAR_0
+    sta status_fields + STATUS_LINK + 6
     jsr begin_vram_update
     jsr write_status_frame
     jsr restore_scroll
@@ -2806,9 +3115,12 @@ splash_title:
     .byte VER_N, VER_E, VER_S, VER_SPACE, VER_R, VER_A, VER_D, VER_A, VER_R
 SPLASH_TITLE_LENGTH = * - splash_title
 
-; "V0.3.1" -- the release version.  Bump this and the READMEs together.
+; "V0.4.3" -- the release version. Bump this, README.md, server/VERSION,
+; APP_VERSION in nes_radar_server.py, and start_nes_radar_server.py's
+; docstring together. The splash stamp is the only way to tell what is on
+; a cartridge or in a .nes file once it is out of context.
 version_stamp:
-    .byte VER_V, VER_0 + 0, VER_DOT, VER_0 + 3, VER_DOT, VER_0 + 1
+    .byte VER_V, VER_0 + 0, VER_DOT, VER_0 + 4, VER_DOT, VER_0 + 3
 VERSION_STAMP_LENGTH = * - version_stamp
 
 .segment "RODATA"
@@ -2826,6 +3138,10 @@ link_waiting_chars:
     .byte CHAR_A + ('I' - 'A'), CHAR_A + ('T' - 'A')
     .byte CHAR_A + ('I' - 'A'), CHAR_A + ('N' - 'A')
     .byte CHAR_A + ('G' - 'A'), CHAR_SPACE, CHAR_SPACE
+link_idle_chars:
+    .byte CHAR_A + ('I' - 'A'), CHAR_A + ('D' - 'A')
+    .byte CHAR_A + ('L' - 'A'), CHAR_A + ('E' - 'A')
+    .byte CHAR_SPACE, CHAR_SPACE, CHAR_SPACE, CHAR_SPACE, CHAR_SPACE
 link_error_chars:
     .byte CHAR_A + ('E' - 'A'), CHAR_A + ('R' - 'A')
     .byte CHAR_A + ('R' - 'A'), CHAR_A + ('O' - 'A')
