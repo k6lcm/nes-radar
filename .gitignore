@@ -1,5 +1,5 @@
-# Build output. The shipped ROM and server packages live in executables/;
-# everything a local `make` or release build produces is disposable.
+# Local build output. Release artifacts attach to GitHub Releases and are
+# never tracked here.
 nes_radar/build/
 nes_radar/*.nes
 server/artifacts/
