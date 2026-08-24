@@ -2,10 +2,17 @@
 
 ## 0.4.4
 
-- Keep the existing paired 16×16 aircraft sprite-priority rotation moving
-  during `LINK RECEIVING`. The server sends a one-byte display heartbeat only
-  in the known idle interval before the next packet; sprite artwork and scene
-  data are unchanged.
+- Paired 16×16 aircraft targets now keep flickering through `LINK RECEIVING`.
+  In its known-idle time the server sends a one-byte display heartbeat that
+  advances the ROM's OAM-priority rotation and nothing else; scene data,
+  sequence state, and CRCs are untouched.
+- Needs the matching 0.4.4 ROM and 0.4.4 server for the visible fix. A 0.4.4
+  server against a 0.4.3 ROM is safe — the heartbeat byte is ignored as
+  pre-marker noise — but the sprites will still freeze on one priority in
+  `RECEIVING`.
+- There are no additional wiring, cartridge, or protocol changes from 0.4.3.
+  Calibrated receive and reverse-UART routines and the sprite CHR are
+  identical to a clean 0.4.3 build.
 
 ## 0.4.3
 
