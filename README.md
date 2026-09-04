@@ -107,6 +107,33 @@ This wiring was accepted on an **NTSC** NES. Some PAL consoles have additional p
 
 ## Running the server
 
+### FTDI drivers
+
+The server can only list the adapter if your operating system recognizes it
+first. If it never appears in the numbered device list, install the FTDI
+**Virtual COM Port (VCP)** driver for your platform from
+[ftdichip.com/drivers/vcp-drivers](https://ftdichip.com/drivers/vcp-drivers/)
+(installation guides are at
+[ftdichip.com/document/installation-guides](https://ftdichip.com/document/installation-guides/)).
+Use the VCP driver, not D2XX — the server talks to a serial port.
+
+- **macOS** — 10.15 and later include an Apple FTDI driver, so a genuine
+  FT232R cable usually just works and shows up as `/dev/cu.usbserial-*`. Install
+  FTDI's [macOS VCP driver](https://ftdichip.com/drivers/vcp-drivers/) only if
+  the port never appears.
+- **Windows** — the driver normally arrives through Windows Update the first
+  time you plug the cable in, and the adapter becomes a `COM` port. If it comes
+  up as an unknown device, run FTDI's
+  [Windows VCP setup executable](https://ftdichip.com/drivers/vcp-drivers/).
+- **Linux** — the in-kernel `ftdi_sio` driver is already there and the adapter
+  appears as `/dev/ttyUSB0`. No download is needed; if you get a permission
+  error opening it, add your user to the `dialout` group and log back in.
+
+Counterfeit FT232R chips are common on cheap adapters and can fail to enumerate
+or stop working after a driver update. That is one more reason the genuine
+[`TTL-232R-5V-WE`](https://ftdichip.com/products/ttl-232r-5v-we/) is the
+recommended part.
+
 ### macOS
 
 The macOS build is a self-contained Universal 2 binary — it carries its own
