@@ -19,6 +19,8 @@ This project is based on [c64u-radar](https://github.com/k6lcm/c64u-radar), a si
 
 ![NES Radar scope screen](assets/nes-radar-scope.png)
 
+*The data blocks show TGT: Target #, TYPE: Aircraft Type, REG: Registration, SQWK: Squawk Code, CAT: Category, ALT: Altitude, SPD: Speed (kts), TRK: Track (degrees), V/S: Vertical Speed (ft/min), DIST: Distance From Airport/Center*
+
 
 ## What you need
 
