@@ -24,8 +24,13 @@ $(METASPRITE_STAMP): tools/generate_assets.py tools/generate_metasprites.py | bu
 
 assets: $(METASPRITE_STAMP) $(LDV_ASSETS) $(SPLASH_ASSETS)
 
-$(OBJ): nes/nes_radar_scope_v3.s $(METASPRITE_STAMP) $(LDV_ASSETS) $(SPLASH_ASSETS) | build
-	ca65 -g -I build -I $(LDV_DIR) -o $@ $<
+# The link to the nesp32 is nesp32's library, copied into vendor/nesp32 by
+# tools/update_nesp32.sh.
+NESP_DIR := vendor/nesp32
+NESP_LIB := $(NESP_DIR)/nesp.inc $(NESP_DIR)/nesp_proto.inc $(NESP_DIR)/link.inc
+
+$(OBJ): nes/nes_radar_scope_v3.s nes/radar_link.inc $(NESP_LIB) $(METASPRITE_STAMP) $(LDV_ASSETS) $(SPLASH_ASSETS) | build
+	ca65 -g -I build -I $(LDV_DIR) -I nes -I $(NESP_DIR) -o $@ $<
 
 $(ROM): $(OBJ) nes/cnrom256.cfg
 	ld65 -C nes/cnrom256.cfg -o $@ -m build/nes_radar_scope_v3.map \
@@ -36,14 +41,6 @@ $(PRG_IMAGE) $(CHR_IMAGE): $(ROM) tools/split_cnrom.py | build
 
 hardware-images: $(PRG_IMAGE) $(CHR_IMAGE)
 
-# The reverse-channel transmit routine is cycle-timed and the bit period
-# depends on its own linked address, because a delay loop straddling a page
-# boundary would silently drop the baud rate from 9600 to 8170. Both
-# verifiers run against the built ROM: verify_tx_timing charges the extra
-# cycle a taken branch pays crossing a page and checks all 256 byte values,
-# and verify_frame_bytes demodulates the ROM's own writes to $4016 and
-# compares them against the server's request_bytes(), so the two sides catch
-# each other disagreeing rather than restating a rule.
 verify: $(ROM) hardware-images
 	test "$$(wc -c < $(ROM) | tr -d ' ')" = "65552"
 	printf 'NES\032\002\004\060\000' | cmp -n 8 - $(ROM)
@@ -56,8 +53,6 @@ verify: $(ROM) hardware-images
 	test "$$(wc -c < $(SPLASH_DIR)/splash_bg.palette.bin | tr -d ' ')" = "16"
 	test "$$(wc -c < $(PRG_IMAGE) | tr -d ' ')" = "32768"
 	test "$$(wc -c < $(CHR_IMAGE) | tr -d ' ')" = "32768"
-	$(PYTHON) tools/verify_tx_timing.py $(ROM) build/nes_radar_scope_v3.dbg
-	$(PYTHON) tools/verify_frame_bytes.py $(ROM) build/nes_radar_scope_v3.dbg
 
 clean:
 	rm -rf build $(ROM)

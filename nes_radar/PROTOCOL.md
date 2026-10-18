@@ -1,5 +1,14 @@
 # NES Radar Protocol v2
 
+> [!NOTE]
+> This is the protocol of the 0.4.x FTDI cable, kept on the
+> [`legacy/ftdi-0.4.x`](https://github.com/k6lcm/nes-radar/tree/legacy/ftdi-0.4.x)
+> branch. From 0.5.0 the ROM talks to a nesp32 instead, over
+> [nesp32's link](https://github.com/Armitage64/nesp32/blob/main/docs/PROTOCOL.md).
+> The packet envelope, timing and requests below no longer apply. The
+> target and identity records still do: the nesp32's RADAR service sends
+> them byte for byte as described here.
+
 The host-to-NES path uses length-delimited CRC packets with a calibrated
 6502 UART receiver. v2 keeps the byte receiver, bit delays, byte guard, and
 CRC implementation from v0 and extends only the validated payload records
