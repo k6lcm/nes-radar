@@ -73,11 +73,21 @@ Wikidata has most airports, but not every small field, and it puts some a little
 - Live traffic needs the nesp32 to reach adsb.fi and Wikidata over HTTPS.
 - PAL consoles are not claimed.
 
+## Making changes
+
+NES Radar is in two repositories: the ROM is here, and
+[nesp32](https://github.com/Armitage64/nesp32) has this repository as a
+submodule, builds it for its cartridge, and has the firmware it talks to.
+ROM changes are made here and released, and nesp32 then moves its
+submodule to them. [`AGENTS.md`](AGENTS.md) has which change goes where
+and the rules for keeping the two in step.
+
 ## Repository layout
 
 | Path | What it is |
 |---|---|
 | [`CHANGELOG.md`](CHANGELOG.md) | Version-by-version summary. |
+| [`AGENTS.md`](AGENTS.md) | How changes are made here and in nesp32 (`CLAUDE.md` points to it). |
 | [`nes_radar/`](nes_radar) | The buildable NES ROM source, build files, record documentation, and required runtime assets. |
 | `nes_radar/vendor/nesp32/` | A copy of the nesp32's link library for the console. |
 
