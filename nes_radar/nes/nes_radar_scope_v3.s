@@ -1,9 +1,7 @@
 ; NES Radar Scope v2 -- LDV display layer
 ;
-; Starts with a controller-1 ICAO editor, reports the selected four-letter code
-; through controller-port-2 OUT0, then receives radar data through port-2 D0 at
-; the Milestone 005-proven 9600-baud timing. The complete receive primitive is
-; unchanged; controller 1 is sampled only after complete bytes.
+; Starts with a controller-1 ICAO editor, then asks a nesp32 on controller
+; port 2 for the airport and its aircraft (nes/radar_link.inc).
 
 .setcpu "6502"
 
@@ -20,12 +18,6 @@ JOY2      = $4017
 DMC_FREQ  = $4010
 APUSTATUS = $4015
 
-MARKER            = $A5
-OAM_HEARTBEAT     = $5A
-PACKET_TYPE_SCENE = $01
-PACKET_TYPE_IDENTITY = $02
-PACKET_TYPE_LOCATION = $03
-PROTOCOL_VERSION  = $02
 MAX_TARGETS       = 8
 RECORD_SIZE       = 9
 IDENTITY_RECORD_SIZE = 25
@@ -36,7 +28,6 @@ SCENE_SEVERE      = $1C
 TRACK_INVALID     = $08
 ALT_INVALID       = $10
 SPEED_INVALID     = $20
-TARGET_ALERT      = $40
 
 PPUCTRL_SPR_8X16  = %00100000
 PPUCTRL_UPDATE_NMI = %10100000
@@ -62,7 +53,6 @@ STARTUP_SPRITE_PALETTE = 2
 
 SCOPE_ORIGIN_X    = 56
 SCOPE_ORIGIN_Y    = 24
-SCOPE_LOCAL_LIMIT = 144
 META_CENTRE_X     = 7
 META_CENTRE_Y     = 7
 META_LDV_OFFSET_X_LEFT  = SCOPE_ORIGIN_X - META_CENTRE_X
@@ -94,38 +84,12 @@ BUTTON_UP         = $08
 BUTTON_DOWN       = $04
 BUTTON_LEFT       = $02
 BUTTON_RIGHT      = $01
-OUT0_REQUEST_MARKER = $4E
-OUT0_CHECK_SEED   = $A5
 
-; Reverse channel, NES to host.
-;
-; 9,600 8N1 bit-banged on OUT0 and read as ordinary UART data on the host's
-; RXD. OUT0 high is mark, low is space, so no inverter is needed; the ROM
-; rests OUT0 low, which the host sees as one break byte at each edge of a
-; burst. Both requests are six bytes: marker, four payload bytes, and an
-; XOR checksum seeded with $A5. See tools/verify_frame_bytes.py and
-; ../SIGNALING.md.
 
-; The pause request is a six-byte UART frame with its own marker, padded to
-; the same length as a location request so both share one length and one
-; checksum rule. A zero payload can never collide with a location request
-; because the editor only ever emits A-Z.
-PAUSE_REQUEST_MARKER = $50
-UART_FRAME_BYTES     = 6
-UART_GUARD_UNITS     = 8          ; 800 us of mark before the first start bit
-; Shortened from 448 when chunked reception arrived. The window used to be the
-; only time the controller did anything, so it wanted to be long. Now the pad
-; also works between chunks, and the time is needed for the chunk gaps instead.
-DISPLAY_WINDOW_FRAMES = 360       ; 6.00 seconds at NTSC field rate
-
-; The host holds a long quiet gap after every CHUNK_BYTES bytes of a packet.
-; That gap is the only moment inside a packet with room to wait for vblank and
-; repaint, so it is where the selection is serviced. Both sides count the
-; marker as byte 1 and must agree on this number: the server's --chunk-bytes
-; defaults to the same 8. A mismatch is loud rather than silent, since the ROM
-; would spend a gap that is not there and lose the next byte to a CRC failure.
-CHUNK_BYTES = 8
 LINK_STALE_FRAMES     = 600       ; 10 seconds without a valid packet
+LINK_DOT_FRAMES       = 8         ; between one dot after LIVE and the next
+LINK_STREAM_STEPS     = 4         ; one, two, three dots and LIVE again: about
+                                  ; half a second for each new piece of data
 SPLASH_FRAMES         = 120       ; about two seconds at NTSC field rate
 CHR_BANK_SPLASH       = 0
 CHR_BANK_RADAR        = 1
@@ -154,25 +118,13 @@ VERSION_STAMP_ADDR    = $236D     ; row 27, column 13 -- one blank row below
 .include "assets_metasprite.inc"
 
 .segment "ZEROPAGE"
-received:       .res 1
-crc_hi:         .res 1
-crc_lo:         .res 1
-received_hi:    .res 1
-received_lo:    .res 1
-packet_seq:     .res 1
-packet_type:    .res 1
 packet_flags:   .res 1
 packet_count:   .res 1
-packet_length:  .res 1
-have_seq:       .res 1
-last_seq:       .res 1
-expected_seq:   .res 1
 temp:           .res 1
 record_flags:   .res 1
 slot_number:    .res 1
 records_left:   .res 1
 seen_slots:     .res 1
-error_code:     .res 1
 panel_offset:   .res 1
 value_lo:       .res 1
 value_hi:       .res 1
@@ -189,11 +141,6 @@ controller_pressed: .res 1
 controller_pending: .res 1
 editor_index:   .res 1
 startup_error:  .res 1
-; Two reserved zero-page bytes. They preserve the zero-page layout of the
-; hardware-accepted ROM so the built .nes file stays bit-identical.
-_reserved0:     .res 1
-_reserved1:     .res 1
-delay_blocks:   .res 1
 field_src:      .res 2
 field_width:    .res 1
 field_font:     .res 1
@@ -206,27 +153,20 @@ oam_rotation:   .res 1
 track_value:    .res 1
 table_slot_index: .res 1
 table_rows_left: .res 1
-identity_offset: .res 1
 displayed_count: .res 1
-display_frames_lo: .res 1
-display_frames_hi: .res 1
 link_age_lo:     .res 1
 link_age_hi:     .res 1
 link_timed_out:  .res 1
-link_data_stale: .res 1
+link_live:       .res 1           ; the LINK field says LIVE
+link_stream:     .res 1           ; dot steps left: new scenes are coming
+link_dot_timer:  .res 1
+link_dots:       .res 1
+link_dirty:      .res 1           ; the dots have changed and are not on screen
 navigation_requested: .res 1
-pause_waiting:        .res 1
-; Reverse-UART transmit scratch.
-tx_byte:              .res 1
-tx_index:             .res 1
-chunk_count:          .res 1
-pad_commit_pending:   .res 1
 
 .segment "BSS"
 .align 256
 oam_shadow:     .res 256
-sample_port1:   .res 1
-sample_port2:   .res 1
 scene_payload:  .res MAX_PAYLOAD
 identity_tiles: .res 192
 icao_code:      .res 4
@@ -234,16 +174,17 @@ selected_fields: .res 37
 status_fields:   .res STATUS_SIZE
 startup_cursor:  .res 4
 splash_frames:   .res 1
-; Reverse-UART frame in transmission order: marker, four payload bytes, XOR
-; checksum. Assembled here rather than sent on the fly because uart_tx_byte
-; destroys every register and cannot host a loop counter.
-uart_frame:      .res UART_FRAME_BYTES
 
 .segment "HEADER"
     .byte "NES", $1A
     .byte 2                       ; 32 KiB fixed PRG
+.ifdef CART
+    .byte 2                       ; the splash's tiles and the scope's, once each
+    .byte $10, $00                ; a part of nesp32's cartridge, which is an MMC1
+.else
     .byte 4                       ; four 8 KiB CHR-ROM banks
     .byte $30, $00                ; mapper 3 CN-ROM, horizontal mirroring
+.endif
     .res 8, $00
 
 .segment "CODE"
@@ -260,6 +201,12 @@ uart_frame:      .res UART_FRAME_BYTES
     stx PPUMASK
     stx DMC_FREQ
     stx APUSTATUS
+
+    stx radar_id                  ; no airport chosen, and no hello said
+    stx radar_greeted
+    stx radar_chosen
+    lda #OUT0_MARK                ; the line to the nesp32 leaves break
+    sta JOY1
 
     bit PPUSTATUS
 @wait_vblank_1:
@@ -278,7 +225,6 @@ uart_frame:      .res UART_FRAME_BYTES
     lda #'A'
     sta icao_code + 3
     lda #0
-    sta have_seq
     sta startup_error
     sta active_slots
     sta selected_slot
@@ -290,25 +236,25 @@ uart_frame:      .res UART_FRAME_BYTES
     sta link_age_hi
     sta link_timed_out
     sta navigation_requested
-    sta pause_waiting
     lda #1
-    sta link_data_stale
     jsr initialize_display_buffers
     jsr initialize_splash_video
     jsr wait_splash
+    jsr radar_recall              ; the editor begins at the airport the nesp32 kept
 
+radar_editor:                     ; nes/radar_link.inc comes back here
 @show_editor:
     jsr initialize_startup_video
     lda #0
     sta editor_index
-    sta controller_previous
     sta navigation_requested
-    sta pause_waiting
+    jsr read_controller           ; a button still held from the scope, or from
+    lda controller_current        ; Start, is not a press
+    sta controller_previous
     jsr render_editor
     lda startup_error
     beq @editor_loop
-    lda #1
-    jsr show_startup_message
+    jsr radar_show_error          ; which of the reasons there was no scope
 
 @editor_loop:
     jsr wait_vblank
@@ -323,6 +269,13 @@ uart_frame:      .res UART_FRAME_BYTES
     lda controller_pressed
     and #BUTTON_START
     bne @submit_icao
+.ifdef CART
+    lda controller_pressed
+    and #BUTTON_SELECT
+    beq :+
+    jmp to_cart_menu
+:
+.endif
     lda controller_pressed
     and #BUTTON_UP
     bne @letter_up
@@ -383,615 +336,9 @@ uart_frame:      .res UART_FRAME_BYTES
     jmp @editor_loop
 
 @submit_icao:
-    lda #0
-    jsr show_startup_message
-    jsr send_location_request
-    lda #0
-    sta have_seq
-
-@seek_marker:
-    jsr receive_marker_byte_with_idle
-    ; Keep the received marker and framing carry intact until both are checked.
-    ; Both flags are strictly 0/1, so BIT preserves the marker and carry.
-    bit navigation_requested
-    beq :+
-    bit pause_waiting
-    bne :+
-    jmp @request_navigation_pause
-:
-    bcc :+
-    jmp @framing_error
-:
-    ; This is one byte larger than the original CMP/BNE marker check. The
-    ; equal-only branch into @payload_start below saves that byte back so the
-    ; address-sensitive receiver does not move.
-    jsr dispatch_marker
-    bcc @seek_marker
-
-    ; The marker is byte 1 of the packet and does not come through
-    ; receive_byte_with_controller, so seed the count rather than zero it.
-    lda #1
-    sta chunk_count
-
-    lda #$FF
-    sta crc_hi
-    sta crc_lo
-
-    jsr receive_and_crc
-    bcc :+
-    jmp @framing_error
-:
-    sta packet_type
-    cmp #PACKET_TYPE_SCENE
-    beq :+
-    cmp #PACKET_TYPE_IDENTITY
-    beq :+
-    cmp #PACKET_TYPE_LOCATION
-    beq :+
-    jmp @header_error
-:
-
-    jsr receive_and_crc
-    bcs @framing_error
-    cmp #PROTOCOL_VERSION
-    bne @header_error
-
-    jsr receive_and_crc
-    bcs @framing_error
-    sta packet_seq
-
-    jsr receive_and_crc
-    bcs @framing_error
-    sta packet_flags
-
-    jsr receive_and_crc
-    bcs @framing_error
-    sta packet_count
-
-    jsr receive_and_crc
-    bcs @framing_error
-    sta packet_length
-
-    lda packet_type
-    cmp #PACKET_TYPE_SCENE
-    bne @non_scene_header
-    lda packet_flags
-    and #$E0
-    bne @header_error
-    lda packet_count
-    cmp #MAX_TARGETS + 1
-    bcs @header_error
-    sta temp
-    asl a
-    asl a
-    asl a                          ; count * 8
-    clc
-    adc temp                       ; count * 9
-    cmp packet_length
-    bne @header_error
-    beq @payload_start              ; equality is known; one byte under JMP
-
-@non_scene_header:
-    cmp #PACKET_TYPE_IDENTITY
-    beq @identity_header
-    lda packet_flags
-    and #$FE
-    bne @header_error
-    lda packet_count
-    cmp #1
-    bne @header_error
-    lda packet_length
-    cmp #4
-    bne @header_error
-    jmp @payload_start
-
-@identity_header:
-    lda packet_flags
-    bne @header_error
-    lda packet_count
-    cmp #MAX_TARGETS + 1
-    bcs @header_error
-    sta temp
-    asl a
-    asl a
-    asl a                          ; count * 8
-    sta record_flags
-    asl a                          ; count * 16
-    clc
-    adc record_flags               ; count * 24
-    clc
-    adc temp                       ; count * 25
-    cmp packet_length
-    bne @header_error
-    jmp @payload_start
-
-@framing_error:
-    lda #1                         ; UART stop-bit/framing failure
-    jsr show_error
-    jmp @seek_marker
-
-@header_error:
-    lda #2                         ; type/version/flags/count/length
-    jsr show_error
-    jmp @seek_marker
-
-@payload_start:
-    ldy #0
-@payload_byte:
-    cpy packet_length
-    beq @payload_done
-    jsr receive_and_crc
-    bcs @framing_error
-    sta scene_payload,y
-    iny
-    bne @payload_byte
-
-@payload_done:
-    jsr receive_byte_with_controller
-    bcs @framing_error
-    sta received_hi
-    jsr receive_byte_with_controller
-    bcs @framing_error
-    sta received_lo
-    lda received_hi
-    cmp crc_hi
-    bne @crc_error
-    lda received_lo
-    cmp crc_lo
-    bne @crc_error
-    jsr note_valid_packet
-
-    lda packet_type
-    cmp #PACKET_TYPE_LOCATION
-    beq @location_payload
-    cmp #PACKET_TYPE_IDENTITY
-    beq @identity_payload
-    jsr validate_records
-    bcs @record_error
-    jmp @records_valid
-
-@identity_payload:
-    jsr validate_identity_records
-    bcs @record_error
-    lda packet_count
-    bne @identity_records
-    jsr service_control_heartbeat
-    lda navigation_requested
-    beq @heartbeat_done
-    lda pause_waiting
-    beq @heartbeat_done
-    jmp @return_to_editor
-@heartbeat_done:
-    jmp @seek_marker
-@identity_records:
-    jsr apply_identity_records
-    jsr build_selected_identity
-    jmp @seek_marker
-
-@location_payload:
-    ldx #0
-@location_character:
-    lda scene_payload,x
-    cmp #'A'
-    bcc @record_error
-    cmp #'Z' + 1
-    bcs @record_error
-    cmp icao_code,x
-    bne @record_error
-    inx
-    cpx #4
-    bne @location_character
-    lda packet_flags
-    and #1
-    beq @location_valid
-    lda #1
-    sta startup_error
-    jmp @show_editor
-@location_valid:
-    jsr initialize_display_buffers
-    jsr initialize_video
-    lda #0
-    sta have_seq
-    jmp @seek_marker
-
-@crc_error:
-    lda #3                         ; CRC-16 mismatch
-    jsr show_error
-    jmp @seek_marker
-
-@record_error:
-    lda #4                         ; scene/identity record or location-result mismatch
-    jsr show_error
-    jmp @seek_marker
-
-@records_valid:
-    lda have_seq
-    beq @accept
-    lda packet_seq
-    cmp last_seq
-    bne :+
-    jmp @seek_marker               ; exact duplicate: no display change
-:
-    cmp expected_seq
-    beq @accept
-
-    ; Reject the gap scene, but establish a recovery point. The next
-    ; sequential scene can be accepted instead of latching an error forever.
-    lda packet_seq
-    sta last_seq
-    clc
-    adc #1
-    sta expected_seq
-    lda #5                         ; sequence gap/out-of-order scene
-    jsr show_error
-    jmp @seek_marker
-
-@accept:
-    lda packet_seq
-    sta last_seq
-    clc
-    adc #1
-    sta expected_seq
-    lda #1
-    sta have_seq
-
-    lda seen_slots
-    sta active_slots
-    lda packet_count
-    sta displayed_count
-    jsr update_selection
-    jsr build_oam_shadow
-    jsr build_selected_fields
-    jsr build_status_fields
-    lda #0
-    sta link_data_stale
-    lda packet_flags
-    and #SCENE_STALE
-    beq :+
-    lda #1
-    sta link_data_stale
-    sta link_timed_out             ; already visibly WAITING; do not re-fire
-    jsr set_link_waiting
-    jsr forget_scene_sequence
-:
-    lda packet_flags
-    and #SCENE_SEVERE
-    beq :+
-    lda #1
-    sta link_data_stale
-    jsr set_link_error
-:
-    jsr commit_display
-    inc oam_rotation
-    lda oam_rotation
-    and #7
-    sta oam_rotation
-    jsr animate_display_window
-    lda navigation_requested
-    bne :+
-    jmp @seek_marker
-:
-    lda pause_waiting
-    beq @request_navigation_pause
-    jmp @seek_marker
-
-@request_navigation_pause:
-    lda #1
-    sta pause_waiting
-    jsr send_pause_request
-    jmp @seek_marker
-
-@return_to_editor:
-    lda #0
-    sta navigation_requested
-    sta pause_waiting
-    sta have_seq
-    sta active_slots
-    sta controller_pending
-    sta startup_error
-    jmp @show_editor
+    jmp radar_submit              ; the airport and the scope, over the nesp32's link
 .endproc
 
-; Receive one byte and fold it into CRC-16/CCITT-FALSE. Returns the original
-; byte in A. Carry preserves the framing-error convention from receive_byte.
-.proc receive_and_crc
-    jsr receive_byte_with_controller
-    bcs @error
-    sta temp
-    jsr crc16_update
-    lda temp
-    clc
-@error:
-    rts
-.endproc
-
-; CRC-16/CCITT-FALSE: polynomial $1021, initial $FFFF, MSB first, no final XOR.
-; A is the next byte and crc_hi:crc_lo is the running value.
-.proc crc16_update
-    eor crc_hi
-    sta crc_hi
-    ldx #8
-@bit:
-    asl crc_lo
-    rol crc_hi
-    bcc @next
-    lda crc_hi
-    eor #$10
-    sta crc_hi
-    lda crc_lo
-    eor #$21
-    sta crc_lo
-@next:
-    dex
-    bne @bit
-    rts
-.endproc
-
-; Returns the received byte in A/received with carry clear. Carry set means an
-; invalid LOW stop sample. This is kept cycle-for-cycle with Milestone 005.
-.proc receive_byte
-@seek_high:
-    jsr sample_line
-    beq @seek_high
-@wait_start:
-    jsr sample_line
-    bne @wait_start
-
-    lda #$00
-    sta received
-    jsr delay_start_to_bit0
-
-    .repeat 7
-        jsr sample_line
-        cmp #1
-        ror received
-        jsr delay_between_samples
-    .endrepeat
-
-    jsr sample_line
-    cmp #1
-    ror received
-    jsr delay_between_samples
-
-    jsr sample_line
-    beq @framing_error
-    lda received
-    clc
-    rts
-@framing_error:
-    sec
-    rts
-.endproc
-
-; The host leaves a 5 ms guard after every byte. Use that already-provisioned
-; quiet interval to scan controller 1 and latch edges, while leaving the
-; hardware-proven receive_byte and its cycle timing completely unchanged.
-.proc receive_byte_with_controller
-    jsr receive_byte
-    php
-    pha
-    txa
-    pha
-    tya
-    pha
-    jsr latch_controller
-    ; Every packet byte after the marker arrives here, so this is where the
-    ; chunk boundary falls. receive_byte is not touched: the gap is found by
-    ; counting bytes, not by timing the line, which keeps the cycle-counted
-    ; sampling path exactly as it was proven.
-    inc chunk_count
-    lda chunk_count
-    cmp #CHUNK_BYTES
-    bne :+
-    lda #0
-    sta chunk_count
-    jsr chunk_service
-:
-    pla
-    tay
-    pla
-    tax
-    pla
-    plp
-    rts
-.endproc
-
-; Service the pad inside a chunk gap. The host guarantees about 30 ms here and
-; the worst case below is a vblank wait of one frame plus the write, near 18 ms.
-;
-; Select is deliberately left pending. Its owner is the display window or the
-; link timeout, and handing a pause request to the middle of a packet would
-; start a reverse transmission while the host is still sending.
-.proc chunk_service
-    ; The caller latched the pad immediately before this, so do not latch again.
-    lda controller_pending
-    and #(BUTTON_UP | BUTTON_DOWN | BUTTON_LEFT | BUTTON_RIGHT)
-    sta controller_pressed
-    beq @carry_over                ; nothing new, but a prepared panel may wait
-    eor #$FF
-    and controller_pending
-    sta controller_pending
-    jsr move_selection
-    jsr build_selected_fields
-    jmp @commit
-@carry_over:
-    ; A press picked up during the marker wait can arrive with its panel built
-    ; and no vblank spent yet. The gap is a better place to finish it than the
-    ; hunt, so take it here rather than leaving the screen a frame behind.
-    lda pad_commit_pending
-    beq @done
-@commit:
-    lda #0
-    sta pad_commit_pending
-    ; The gap is long enough to wait for vblank properly, unlike the hunt.
-    jsr commit_selection
-@done:
-    rts
-.endproc
-
-; Wait for the next packet marker while keeping Select and link age responsive.
-; The once-per-vblank hook replaces the rejected continuous controller scan.
-; Once a LOW start bit is found, the calibrated sampling sequence below is
-; identical to receive_byte; every remaining byte still uses receive_byte.
-.proc receive_marker_byte_with_idle
-@seek_high:
-    jsr sample_line
-    bne @wait_start
-    jsr service_idle_if_vblank
-    lda navigation_requested
-    beq @seek_high
-    lda pause_waiting
-    beq @cancel
-    jmp @seek_high
-@wait_start:
-    jsr sample_line
-    beq @start
-    jsr service_idle_if_vblank
-    lda navigation_requested
-    beq @wait_start
-    lda pause_waiting
-    beq @cancel
-    jmp @wait_start
-
-@start:
-    lda #$00
-    sta received
-    jsr delay_start_to_bit0
-
-    .repeat 7
-        jsr sample_line
-        cmp #1
-        ror received
-        jsr delay_between_samples
-    .endrepeat
-
-    jsr sample_line
-    cmp #1
-    ror received
-    jsr delay_between_samples
-
-    jsr sample_line
-    beq @framing_error
-    lda received
-    clc
-    rts
-@framing_error:
-@cancel:
-    sec
-    rts
-.endproc
-
-; PPUSTATUS is sampled only while the serial input is HIGH/idle. Work is done
-; at most once per video field. This runs both during the post-scene display
-; window and during the between-packet idle after the window has expired; the
-; chunk gaps inside a packet are handled by their own service point.
-.proc service_idle_if_vblank
-    bit PPUSTATUS
-    bpl @prepare_pad
-    ; --- inside vblank ---
-    ; The write goes first so only the roughly 84 cycles of polling latency sit
-    ; ahead of it. latch_controller and age_link are RAM work and can safely
-    ; run past the end of vblank.
-    lda pad_commit_pending
-    beq @no_commit
-    lda #0
-    sta pad_commit_pending
-    jsr commit_selection_fields
-@no_commit:
-    jsr latch_controller
-    jsr age_link
-    bcc @navigation
-    ; The timeout is a one-shot transition after prolonged silence. Refresh
-    ; all four dynamic frames so no old aircraft remains visible.
-    jsr commit_display
-@navigation:
-    ; During an active stream, update_selection consumes a pending Select only
-    ; after the next scene, at the beginning of a guaranteed quiet window. If
-    ; the link has already timed out, no old stream owns D0, so allow recovery.
-    lda link_timed_out
-    beq @done
-    lda controller_pending
-    and #BUTTON_SELECT
-    beq @done
-    lda #1
-    sta navigation_requested
-    lda controller_pending
-    and #($FF - BUTTON_SELECT)
-    sta controller_pending
-@done:
-    rts
-
-    ; --- outside vblank ---
-    ; Marker-wait responsiveness. Before this the pad was latched here but
-    ; never acted on, so the scope ignored it for the whole gap between the
-    ; display window and the packet, which is one to three seconds.
-    ;
-    ; Only the RAM half runs here. build_selected_fields alone is well over a
-    ; thousand cycles, including a 45-iteration multiply, and putting it inside
-    ; vblank would overrun into rendering and produce garbage tiles. The write
-    ; waits for the next vblank, one frame later.
-    ;
-    ; This costs sampling blindness while it runs, so it is gated on an actual
-    ; press. A held direction produces one edge, not a stream, so the exposure
-    ; is one burst per press rather than one per frame.
-@prepare_pad:
-    lda pad_commit_pending
-    bne @done
-    lda controller_pending
-    and #(BUTTON_UP | BUTTON_DOWN | BUTTON_LEFT | BUTTON_RIGHT)
-    sta controller_pressed
-    beq @done
-    eor #$FF
-    and controller_pending
-    sta controller_pending
-    jsr move_selection
-    jsr build_selected_fields
-    lda #1
-    sta pad_commit_pending
-    ; Throw away a vblank that began while the work above was running. Without
-    ; this the next poll sees the flag set and commits, but the flag says only
-    ; that vblank started at some point during those two thousand cycles, not
-    ; that it started recently. Committing near the end of vblank overruns into
-    ; rendering, and a $2007 write during rendering lands wherever v has
-    ; drifted, so it scribbles the nametable rather than failing cleanly. That
-    ; is what destroyed the scope background and produced bursts of garbage.
-    ;
-    ; Discarding it costs one frame of latency on the repaint and makes the
-    ; poll's 84-cycle bound the real bound.
-    bit PPUSTATUS
-    rts
-.endproc
-
-.proc sample_line
-    ldx #1
-    stx JOY1
-    dex
-    stx JOY1
-    pha
-    pla
-    lda JOY1
-    sta sample_port1,x
-    lda JOY2
-    sta sample_port2,x
-    lda sample_port2
-    and #$01
-    eor #$01
-    rts
-.endproc
-
-.proc delay_start_to_bit0
-    .repeat 102
-        nop
-    .endrepeat
-    rts
-.endproc
-
-.proc delay_between_samples
-    .repeat 55
-        nop
-    .endrepeat
-    rts
-.endproc
 
 ; Check reserved target flags, coordinate bounds, and unique stable slots.
 ; Carry set reports malformed data without changing the displayed scene.
@@ -1048,48 +395,6 @@ uart_frame:      .res UART_FRAME_BYTES
     rts
 .endproc
 
-; Validate SLOT,CALLSIGN[8],TYPE[4],REG[6],SQWK[4],CAT[2] records. Identity
-; bytes are uppercase ASCII letters, digits, spaces, or hyphens. Carry set
-; reports malformed data without changing the displayed identity table.
-.proc validate_identity_records
-    lda #0
-    sta seen_slots
-    lda packet_count
-    sta records_left
-    ldy #0
-@record:
-    lda records_left
-    beq @valid
-    lda scene_payload,y
-    cmp #MAX_TARGETS
-    bcs @invalid
-    tax
-    lda slot_masks,x
-    and seen_slots
-    bne @invalid
-    lda slot_masks,x
-    ora seen_slots
-    sta seen_slots
-    iny
-    lda #24
-    sta temp
-@character:
-    lda scene_payload,y
-    jsr validate_identity_char
-    bcs @invalid
-    iny
-    dec temp
-    bne @character
-    dec records_left
-    bne @record
-@valid:
-    clc
-    rts
-@invalid:
-    sec
-    rts
-.endproc
-
 .proc validate_identity_char
     cmp #' '
     beq @valid
@@ -1108,43 +413,6 @@ uart_frame:      .res UART_FRAME_BYTES
     rts
 @invalid:
     sec
-    rts
-.endproc
-
-; Translate a validated identity packet into LDV character indices. Each slot
-; owns 24 characters: callsign, type, registration, squawk, and category.
-.proc apply_identity_records
-    lda packet_count
-    sta records_left
-    ldy #0
-@record:
-    lda records_left
-    beq @done
-    lda scene_payload,y
-    sta slot_number
-    lda slot_number
-    asl a
-    asl a
-    asl a                           ; slot * 8
-    sta panel_offset
-    asl a                           ; slot * 16
-    clc
-    adc panel_offset                ; slot * 24
-    tax
-    iny
-    lda #24
-    sta temp
-@character:
-    lda scene_payload,y
-    jsr identity_char_tile
-    sta identity_tiles,x
-    inx
-    iny
-    dec temp
-    bne @character
-    dec records_left
-    bne @record
-@done:
     rts
 .endproc
 
@@ -1380,8 +648,7 @@ uart_frame:      .res UART_FRAME_BYTES
     jmp move_selection
 .endproc
 
-; The slot walk on its own, so a chunk gap can move the selection without
-; going near the Select handling above.
+; The slot walk on its own, without the Select handling above.
 .proc move_selection
     lda selected_slot
     sta previous_selected_slot
@@ -1443,87 +710,6 @@ uart_frame:      .res UART_FRAME_BYTES
     rts
 .endproc
 
-; Advance display work during the receive phase. The host can invoke this with
-; the one-byte OAM_HEARTBEAT marker while the ROM is seeking a packet, and a
-; legal zero-record identity packet retains the same behavior. The last scene
-; payload is still resident. Every heartbeat advances OAM priority so
-; overloaded 16x16 markers keep flickering instead of freezing in one state.
-.proc service_control_heartbeat
-    lda active_slots
-    beq @done
-    jsr update_selection
-    lda displayed_count
-    sta packet_count
-    jsr build_oam_shadow
-    lda selected_slot
-    cmp previous_selected_slot
-    beq @oam_only
-    jsr build_selected_fields
-    jsr commit_selection
-    jmp @advance
-@oam_only:
-    jsr commit_oam
-@advance:
-    inc oam_rotation
-    lda oam_rotation
-    and #7
-    sta oam_rotation
-@done:
-    rts
-.endproc
-
-; Run target flicker and controller polling from the NES vblank clock, exactly
-; once per video field. The host guarantees serial silence for this fixed
-; window, then resumes ordinary v0-timed packets after the routine returns.
-.proc animate_display_window
-    lda #<DISPLAY_WINDOW_FRAMES
-    sta display_frames_lo
-    lda #>DISPLAY_WINDOW_FRAMES
-    sta display_frames_hi
-@frame:
-    jsr update_selection
-    lda navigation_requested
-    bne @done
-    jsr age_link
-    lda displayed_count
-    sta packet_count
-    jsr build_oam_shadow
-    lda selected_slot
-    cmp previous_selected_slot
-    beq @oam_only
-    jsr build_selected_fields
-    jsr commit_selection
-    jmp @advance
-@oam_only:
-    jsr commit_oam
-@advance:
-    inc oam_rotation
-    lda oam_rotation
-    and #7
-    sta oam_rotation
-
-    lda display_frames_lo
-    bne :+
-    dec display_frames_hi
-:
-    dec display_frames_lo
-    lda display_frames_lo
-    ora display_frames_hi
-    bne @frame
-
-    ; The window is over. From here the ROM listens for the next packet and
-    ; stops servicing the controller, so say so before going deaf rather than
-    ; after. Only IDLE is overwritten: WAITING and ERROR describe a link that
-    ; is not delivering, and claiming RECEIVING over either of them would be a
-    ; lie the player has no way to check.
-    lda status_fields + STATUS_LINK
-    cmp #CHAR_A + ('I' - 'A')
-    bne @done
-    jsr set_link_receiving
-    jsr commit_link_state
-@done:
-    rts
-.endproc
 
 .proc build_selected_identity
     lda active_slots
@@ -1760,27 +946,8 @@ uart_frame:      .res UART_FRAME_BYTES
     clc
     adc #CHAR_0
     sta status_fields + STATUS_COUNT + 1
-    ; A scene was just accepted, so the packet is over and the display window
-    ; is about to start. That is the idle half of the cycle, not the receiving
-    ; half. RECEIVING is set later, when the window expires.
-    jsr set_link_idle
-    rts
-.endproc
-
-; Entering WAITING used to blank the targets, the table rows, the selected
-; aircraft and the count. It no longer does. The last complete scene stays on
-; screen and the LINK field is what says the data is old, which is more useful
-; than an empty scope: a scope that erases itself the moment the host pauses
-; looks broken, and the aircraft that were there a moment ago are still the
-; best information available.
-;
-; The sequence state does have to go. The server restarts its sequence
-; numbering on a fresh stream, so a retained have_seq would make the first
-; scene back look like a sequence error.
-.proc forget_scene_sequence
-    lda #0
-    sta have_seq
-    rts
+    ; A scene was just taken from the nesp32: the link is LIVE.
+    jmp set_link_live
 .endproc
 
 ; Remove every visible aircraft while preserving cached identity text for a
@@ -1795,7 +962,6 @@ uart_frame:      .res UART_FRAME_BYTES
     sta selected_slot
     sta previous_selected_slot
     sta oam_rotation
-    sta have_seq
     jsr build_oam_shadow
     jsr build_selected_fields
     lda #CHAR_SPACE
@@ -1805,9 +971,8 @@ uart_frame:      .res UART_FRAME_BYTES
     rts
 .endproc
 
-; A CRC-valid packet proves that the transport is currently active. Scene
-; freshness is tracked separately so a heartbeat cannot make stale ADS-B data
-; appear live.
+; A READY reply from the nesp32 proves the link is working. Whether its
+; scene is fresh is the scene's flags' to say.
 .proc note_valid_packet
     lda #0
     sta link_age_lo
@@ -1835,9 +1000,7 @@ uart_frame:      .res UART_FRAME_BYTES
 @timeout:
     lda #1
     sta link_timed_out
-    sta link_data_stale
     jsr set_link_waiting
-    jsr forget_scene_sequence
     sec
     rts
 @unchanged:
@@ -1845,20 +1008,7 @@ uart_frame:      .res UART_FRAME_BYTES
     rts
 .endproc
 
-; Repaint only the LINK field, waiting for a clean vblank boundary first.
-;
-; Safe only where the host is known to be quiet. The one caller is the end of
-; the display window, which is 360 fields (about 6.00 seconds) out of a 9.500
-; second interval. A packet already in flight cannot be interrupted for this,
-; which is why the state changes at the window boundary rather than at the
-; first start bit.
-.proc commit_link_state
-    jsr begin_vram_update
-    jsr write_link_during_vblank
-    rts
-.endproc
-
-; Called immediately after observing vblank in the idle marker wait.
+; The LINK field alone, for a caller that has just found vblank.
 .proc write_link_during_vblank
     lda #<(status_fields + STATUS_LINK)
     sta field_src
@@ -1874,38 +1024,37 @@ uart_frame:      .res UART_FRAME_BYTES
     rts
 .endproc
 
-.proc set_link_receiving
-    lda #<link_receiving_chars
-    ldx #>link_receiving_chars
-    jmp copy_link_state
-.endproc
-
 .proc set_link_waiting
     lda #<link_waiting_chars
     ldx #>link_waiting_chars
     jmp copy_link_state
 .endproc
 
-; The link is healthy and nothing is arriving. This is also the only state in
-; which the controller does anything, so it doubles as the cue that the scope
-; is yours.
-.proc set_link_idle
-    lda #<link_idle_chars
-    ldx #>link_idle_chars
+; A scene from the nesp32 is on the scope and it is good. The dots after it
+; (link_stream) say that data is coming in.
+.proc set_link_live
+    lda #<link_live_chars
+    ldx #>link_live_chars
+    jsr copy_link_state
+    lda #1
+    sta link_live
+    rts
+.endproc
+
+.proc set_link_adsb_down
+    lda #<link_adsb_down_chars
+    ldx #>link_adsb_down_chars
     jmp copy_link_state
 .endproc
 
-.proc set_link_error
-    lda #<link_error_chars
-    ldx #>link_error_chars
-    jmp copy_link_state
-.endproc
-
-; A:X points to a fixed-width LINK state in ROM.
+; A:X points to a fixed-width LINK state in ROM. Every state but LIVE stops
+; the dots.
 .proc copy_link_state
     sta field_src
     stx field_src + 1
     ldy #0
+    sty link_live
+    sty link_stream
 @copy:
     lda (field_src),y
     sta status_fields + STATUS_LINK,y
@@ -1968,10 +1117,8 @@ uart_frame:      .res UART_FRAME_BYTES
 ; Read a standard controller from port 1. The final bit layout is convenient
 ; for edge handling: A,B,Select,Start,Up,Down,Left,Right become bits 7..0.
 .proc read_controller
-    lda #1
-    sta JOY1
-    lda #0
-    sta JOY1
+    lda #0                        ; OUT0 rests at mark, which holds the pad's
+    sta JOY1                      ; latch open: dropping it takes the buttons
     sta controller_current
     ldx #8
 @button:
@@ -1981,6 +1128,8 @@ uart_frame:      .res UART_FRAME_BYTES
     rol controller_current
     dex
     bne @button
+    lda #OUT0_MARK
+    sta JOY1
     rts
 .endproc
 
@@ -2106,206 +1255,6 @@ uart_frame:      .res UART_FRAME_BYTES
     rts
 .endproc
 
-; ---------------------------------------------------------------------------
-; Reverse channel, NES to host
-; ---------------------------------------------------------------------------
-;
-; Six bytes on the wire: marker, four payload bytes, XOR checksum seeded
-; with $A5. Modulation is 9,600 8N1 UART on OUT0; see ../SIGNALING.md.
-
-
-; 9600 8N1 transmit on OUT0. Every fact the routine depends on was measured
-; on a real NTSC console with a diagnostic ROM before it landed here: 18390
-; bytes with zero corruption, a clean baud window of 9200 to
-; 10200, and 500 round trips with eight controller strobes each landing
-; between the receive and the reply without contaminating either.
-;
-; NTSC runs at 1.789773 MHz, so a 9600 bit is 186.43 cycles. This uses a flat
-; 186, which is 0.23 percent fast. By the stop bit that has accumulated to
-; about 2 percent of a bit, well inside what a 16x oversampling receiver
-; tolerates.
-;
-; Every bit costs the same because the data bit reaches OUT0 without a branch:
-; LSR drops bit 0 into carry and ADC #0 against A=0 turns the carry back into
-; the 0 or 1 that $4016 wants. A branchless path is what makes the loop
-; countable in the first place.
-;
-; Timing is measured write-to-write on STA JOY1, since the write lands on the
-; last cycle of the instruction.
-;
-;   start -> data0 : 171 delay + ldx 2 + lsr 5 + lda 2 + adc 2 + sta 4 = 186
-;   data  -> data  : 168 delay + dex 2 + bne 3 + lsr 5 + lda 2 + adc 2 + sta 4
-;                                                                     = 186
-;   data7 -> stop  : 168 delay + dex 2 + bne 2 + pad 8 + lda 2 + sta 4 = 186
-;
-; A taken branch costs an extra cycle when it crosses a page, so the delay
-; loops are only correct for the addresses the linker happened to give them.
-; Do not move this routine or edit around it without re-running
-; tools/verify_tx_timing.py, which charges that penalty and checks all 256
-; byte values. The failure is silent: the ROM still sends, the host still
-; sees bytes, and some fraction of them are wrong.
-;
-; The stop bit is then held a full bit time before returning, so back-to-back
-; calls always leave at least one stop bit of mark between bytes.
-;
-; The caller must have OUT0 at mark already. Destroys A, X, Y.
-;
-; The alignment is load-bearing, not tidiness. Both delay loops are three bytes
-; and run 33 or 34 times, so if a loop straddles a page boundary every one of
-; those iterations pays the extra cycle a taken branch costs across a page and
-; the bit period goes from 186 to 219, which is 8170 baud. Nothing on the
-; console would report that, it would just corrupt bytes. The routine is 47
-; bytes, so a 64-byte boundary keeps it inside one page wherever the linker
-; puts it. Adding CHUNK_BYTES support moved this code and broke exactly this,
-; caught by tools/verify_tx_timing.py.
-.align 64
-.proc uart_tx_byte
-    sta tx_byte
-
-    lda #0
-    sta JOY1                      ; start bit, T0
-
-    ldy #34                       ; 5*34+1 = 171
-@start_delay:
-    dey
-    bne @start_delay
-
-    ldx #8
-@bit:
-    lsr tx_byte                   ; bit 0 -> carry
-    lda #0
-    adc #0                        ; A = carry, no branch
-    sta JOY1                      ; data bit
-    ldy #33                       ; 5*33+1 = 166
-@bit_delay:
-    dey
-    bne @bit_delay
-    nop                           ; 166 + 2 = 168
-    dex
-    bne @bit
-
-    nop                           ; 8 cycles of padding so the stop bit
-    nop                           ; lands exactly 186 after data bit 7
-    nop
-    nop
-    lda #1
-    sta JOY1                      ; stop bit
-
-    ldy #37                       ; 5*37+1 = 186, one full stop bit
-@stop_delay:
-    dey
-    bne @stop_delay
-    rts
-.endproc
-
-; X = guard in 100 us units. Raise OUT0 to mark and hold it before the first
-; start bit, so a host UART coming out of break has time to re-arm.
-;
-; The guard is 800 us as deliberate margin, not a tuned figure. A guard
-; sweep on real hardware found no floor to tune against: every value from
-; the roughly 22 us the ROM cannot help emitting up through 2000 us produced
-; complete frames.
-.proc begin_mark_x
-    lda #1
-    sta JOY1
-    jsr delay_x_100us
-    rts
-.endproc
-
-; Drop back to the resting break level. OUT0 low is where read_controller and
-; sample_line already leave the pin, so resting there costs nothing and makes
-; ordinary controller strobes invisible to the host. It costs at most one 0x00
-; at the host on the mark-to-break edge, which the host discards because it
-; scans for a marker byte.
-.proc end_mark
-    lda #0
-    sta JOY1
-    rts
-.endproc
-
-; About 103 us, not 100. Kept at its measured value so the 800 us nominal
-; mark guard lands at the same 827 us that hardware measured. Precision is
-; not the point of a guard.
-.proc delay_100us
-    ldy #33
-@loop:
-    dey
-    bne @loop
-    nop
-    rts
-.endproc
-
-.proc delay_x_100us
-    cpx #0
-    beq @done
-@loop:
-    jsr delay_100us
-    dex
-    bne @loop
-@done:
-    rts
-.endproc
-
-; Fill in the checksum over a frame whose marker and payload are already in
-; uart_frame, then put all six bytes on the wire.
-;
-; Checksum: XOR of the marker and payload, seeded with $A5.
-.proc send_uart_frame
-    lda #OUT0_CHECK_SEED
-    ldx #0
-@checksum:
-    eor uart_frame,x
-    inx
-    cpx #UART_FRAME_BYTES - 1
-    bne @checksum
-    sta uart_frame + UART_FRAME_BYTES - 1
-
-    ldx #UART_GUARD_UNITS
-    jsr begin_mark_x
-    lda #0
-    sta tx_index
-@send:
-    ldx tx_index
-    lda uart_frame,x
-    jsr uart_tx_byte              ; destroys A, X and Y, hence tx_index
-    inc tx_index
-    lda tx_index
-    cmp #UART_FRAME_BYTES
-    bne @send
-    jsr end_mark
-    rts
-.endproc
-
-; Marker $4E, four ASCII ICAO letters, XOR checksum seeded with $A5.
-; Six bytes on the wire in about 7.2 ms.
-.proc send_location_request
-    ldx #0
-@copy:
-    lda icao_code,x
-    sta uart_frame + 1,x
-    inx
-    cpx #4
-    bne @copy
-    lda #OUT0_REQUEST_MARKER
-    sta uart_frame
-    jmp send_uart_frame
-.endproc
-
-; Request exclusive controller ownership before exposing the ICAO editor.
-; Marker $50 and a zero payload, so the frame is the same length and obeys the
-; same checksum as a location request.
-.proc send_pause_request
-    lda #0
-    ldx #0
-@pad:
-    sta uart_frame + 1,x
-    inx
-    cpx #4
-    bne @pad
-    lda #PAUSE_REQUEST_MARKER
-    sta uart_frame
-    jmp send_uart_frame
-.endproc
 
 
 .proc initialize_startup_video
@@ -2373,9 +1322,7 @@ uart_frame:      .res UART_FRAME_BYTES
     sta link_age_hi
     sta link_timed_out
     sta navigation_requested
-    sta pause_waiting
     lda #1
-    sta link_data_stale
     jsr load_ldv_palette
 
     bit PPUSTATUS
@@ -2422,8 +1369,7 @@ uart_frame:      .res UART_FRAME_BYTES
     cpx #64
     bne @attributes
 
-    ; Rendering is still off, so initialize the short dynamic status fields
-    ; without consuming any of the host's existing inter-packet guard time.
+    ; Rendering is still off, so the short dynamic status fields go now.
     jsr write_status_frame
 
     ldx #0
@@ -2514,6 +1460,16 @@ uart_frame:      .res UART_FRAME_BYTES
     lda #>$2269
     ldx #<$2269
     jsr write_field
+.ifdef CART
+    lda #<startup_menu
+    sta field_src
+    lda #>startup_menu
+    sta field_src + 1
+    ldy #11
+    lda #>$2289
+    ldx #<$2289
+    jsr write_field
+.endif
     lda #0
     sta field_font
     lda #<startup_traffic_source
@@ -2583,12 +1539,6 @@ uart_frame:      .res UART_FRAME_BYTES
 ; selected panel, and two one-tile table-slot updates.
 .proc commit_selection
     jsr begin_vram_update
-    jmp commit_selection_in_vblank
-.endproc
-
-; The same payload with the wait removed, for a caller that has just observed
-; vblank itself and cannot afford to spend another frame blind to the wire.
-.proc commit_selection_in_vblank
     lda #0
     sta OAMADDR
     lda #>oam_shadow
@@ -2596,20 +1546,16 @@ uart_frame:      .res UART_FRAME_BYTES
     jmp commit_selection_fields
 .endproc
 
-; The nametable half on its own, without the OAM DMA. Counted, because this
-; runs on a vblank the caller found by polling rather than by NMI and the
-; margin is what keeps it off the visible frame:
+; The nametable half of commit_selection. Counted, because this runs on a
+; vblank found by polling rather than by NMI and the margin is what keeps it
+; off the visible frame:
 ;
+;   OAM DMA                 about  520
 ;   write_selected_frame    about 1336 cycles, 35 tiles across nine fields
-;   write_selection_slots   about  66
-;   restore_scroll          about  36
+;   write_selection_slots   about   66
+;   restore_scroll          about   36
 ;                          -----
-;                           about 1438, against 2273 cycles of NTSC vblank
-;
-; Adding the 520-cycle OAM DMA would push that to 1958 and leave under ten
-; percent of margin. Skipping it costs nothing here: the marker wait does not
-; run build_oam_shadow, so the shadow has not changed since the last commit,
-; and the shipped ROM already spent this entire wait without a single DMA.
+;                           about 1958, against 2273 cycles of NTSC vblank
 .proc commit_selection_fields
     jsr write_selected_frame
     jsr write_selection_slots
@@ -2617,9 +1563,7 @@ uart_frame:      .res UART_FRAME_BYTES
     rts
 .endproc
 
-; Heartbeat flicker changes only OAM priority. The host leaves a protected
-; quiet interval after the packet, so this one rendered-vblank DMA completes
-; before the next serial start bit.
+; The targets' turn in front changes only OAM priority: one DMA.
 .proc commit_oam
     jsr begin_vram_update
     lda #0
@@ -2788,7 +1732,6 @@ uart_frame:      .res UART_FRAME_BYTES
     asl a                          ; slot * 16
     clc
     adc temp                       ; slot * 24
-    sta identity_offset
     clc
     adc #<identity_tiles
     sta field_src
@@ -2899,20 +1842,71 @@ uart_frame:      .res UART_FRAME_BYTES
     rts
 .endproc
 
-; Preserve the receiver's error paths and surface the reason through the LDV
-; LINK field as ERROR 1 through ERROR 5. The number distinguishes UART
-; framing, header, CRC, record validation, and scene sequence failures without
-; weakening the receiver or requiring a separate diagnostic ROM.
-.proc show_error
-    sta error_code
-    jsr set_link_error
-    lda error_code
-    clc
-    adc #CHAR_0
-    sta status_fields + STATUS_LINK + 6
+; A link state, A:X as copy_link_state's, on the screen at once.
+.proc show_link
+    jsr copy_link_state
     jsr begin_vram_update
     jsr write_status_frame
-    jsr restore_scroll
+    jmp restore_scroll
+.endproc
+
+; One frame of the dots after LIVE: one, two, three, a step every
+; LINK_DOT_FRAMES, for as long as link_stream has steps left. When it runs
+; out, LIVE stands alone. Carry set if the field has changed.
+.proc tick_link_dots
+    lda link_stream
+    beq @done
+    dec link_dot_timer
+    bne @done
+    lda #LINK_DOT_FRAMES
+    sta link_dot_timer
+    dec link_stream
+    beq @plain
+    inc link_dots
+    lda link_dots
+    cmp #4
+    bcc :+
+    lda #1
+    sta link_dots
+:
+    ldx #0
+@dot:
+    ldy #CHAR_SPACE
+    cpx link_dots
+    bcs :+
+    ldy #CHAR_DOT
+:
+    tya
+    sta status_fields + STATUS_LINK + 4,x
+    inx
+    cpx #3
+    bne @dot
+    sec
+    rts
+@plain:
+    lda #CHAR_SPACE
+    sta status_fields + STATUS_LINK + 4
+    sta status_fields + STATUS_LINK + 5
+    sta status_fields + STATUS_LINK + 6
+    sec
+    rts
+@done:
+    clc
+    rts
+.endproc
+
+; Data is coming from the nesp32, a scene or its names: the dots, if LIVE,
+; from one again.
+.proc note_link_stream
+    lda link_live
+    beq :+
+    lda #0
+    sta link_dots
+    lda #LINK_STREAM_STEPS
+    sta link_stream
+    lda #1                      ; and a step at once
+    sta link_dot_timer
+:
     rts
 .endproc
 
@@ -2920,8 +1914,8 @@ uart_frame:      .res UART_FRAME_BYTES
 ; deliberately left enabled: forced blank skips the pre-render scroll reload
 ; and was the diagnosed cause of the earlier one-tile vertical displacement.
 .proc begin_vram_update
-    ; UART reception runs with NMI disabled. Once a complete packet is safely
-    ; buffered, arm NMI only long enough to get an exact vblank boundary.
+    ; The link runs with NMI disabled. Between exchanges, arm NMI only long
+    ; enough to get an exact vblank boundary.
     lda #0
     sta vblank_ready
     bit PPUSTATUS
@@ -2959,6 +1953,20 @@ uart_frame:      .res UART_FRAME_BYTES
     rts
 .endproc
 
+.ifdef CART
+; Select in the editor, on nesp32's cartridge: back to its menu, the way
+; reset goes there. The cartridge points this program's reset vector at
+; the menu's stub, which resets the mapper and starts the menu. With the
+; picture and the NMI off first, as a reset would leave them.
+.proc to_cart_menu
+    sei
+    lda #0
+    sta PPUCTRL
+    sta PPUMASK
+    jmp ($FFFC)
+.endproc
+.endif
+
 .proc nmi
     pha
     lda #1
@@ -2974,9 +1982,13 @@ uart_frame:      .res UART_FRAME_BYTES
 ; CN-ROM's discrete latch can have PRG bus conflicts.  BANKDATA begins at
 ; $8000 with bytes 0,1,2,3, so A and the ROM byte always agree on the write.
 .proc select_chr_bank
+.ifdef CART
+    jmp radar_cart_chr            ; the cartridge's mapper is asked another way
+.else
     tax
     sta chr_bank_values,x
     rts
+.endif
 .endproc
 
 .proc initialize_splash_video
@@ -3084,11 +2096,18 @@ uart_frame:      .res UART_FRAME_BYTES
     rts
 .endproc
 
+; The splash for SPLASH_FRAMES, or until Start. On nesp32's cartridge it is
+; not skipped: the Start that chose NES Radar from the menu is still held.
 .proc wait_splash
     lda #SPLASH_FRAMES
     sta splash_frames
 @frame:
     jsr wait_vblank
+.ifdef CART
+    dec splash_frames
+    bne @frame
+    rts
+.else
     jsr read_controller
     lda controller_current
     and #BUTTON_START
@@ -3103,24 +2122,10 @@ uart_frame:      .res UART_FRAME_BYTES
     and #BUTTON_START
     bne @release
     rts
+.endif
 .endproc
 
-; Classify a byte returned by the marker hunt without moving any of the
-; address-sensitive receive code. Carry set means a packet marker; carry clear
-; means harmless noise or a completed display heartbeat.
-.proc dispatch_marker
-    cmp #MARKER
-    beq @packet
-    cmp #OAM_HEARTBEAT
-    bne @resume_seek
-    jsr service_control_heartbeat
-@resume_seek:
-    clc
-    rts
-@packet:
-    sec
-    rts
-.endproc
+.include "radar_link.inc"
 
 .segment "BANKDATA"
 chr_bank_values:
@@ -3137,37 +2142,27 @@ splash_title:
     .byte VER_N, VER_E, VER_S, VER_SPACE, VER_R, VER_A, VER_D, VER_A, VER_R
 SPLASH_TITLE_LENGTH = * - splash_title
 
-; "V0.4.4" -- the release version. Bump this, README.md, server/VERSION,
-; APP_VERSION in nes_radar_server.py, and start_nes_radar_server.py's
-; docstring together. The splash stamp is the only way to tell what is on
-; a cartridge or in a .nes file once it is out of context.
+; "V0.5.0" -- the release version. Bump this and README.md together. The
+; splash stamp is the only way to tell what is on a cartridge or in a .nes
+; file once it is out of context.
 version_stamp:
-    .byte VER_V, VER_0 + 0, VER_DOT, VER_0 + 4, VER_DOT, VER_0 + 4
+    .byte VER_V, VER_0 + 0, VER_DOT, VER_0 + 5, VER_DOT, VER_0 + 0
 VERSION_STAMP_LENGTH = * - version_stamp
 
 .segment "RODATA"
 slot_masks:
     .byte $01, $02, $04, $08, $10, $20, $40, $80
 
-link_receiving_chars:
-    .byte CHAR_A + ('R' - 'A'), CHAR_A + ('E' - 'A')
-    .byte CHAR_A + ('C' - 'A'), CHAR_A + ('E' - 'A')
-    .byte CHAR_A + ('I' - 'A'), CHAR_A + ('V' - 'A')
-    .byte CHAR_A + ('I' - 'A'), CHAR_A + ('N' - 'A')
-    .byte CHAR_A + ('G' - 'A')
 link_waiting_chars:
-    .byte CHAR_A + ('W' - 'A'), CHAR_A + ('A' - 'A')
-    .byte CHAR_A + ('I' - 'A'), CHAR_A + ('T' - 'A')
-    .byte CHAR_A + ('I' - 'A'), CHAR_A + ('N' - 'A')
-    .byte CHAR_A + ('G' - 'A'), CHAR_SPACE, CHAR_SPACE
-link_idle_chars:
-    .byte CHAR_A + ('I' - 'A'), CHAR_A + ('D' - 'A')
-    .byte CHAR_A + ('L' - 'A'), CHAR_A + ('E' - 'A')
-    .byte CHAR_SPACE, CHAR_SPACE, CHAR_SPACE, CHAR_SPACE, CHAR_SPACE
-link_error_chars:
-    .byte CHAR_A + ('E' - 'A'), CHAR_A + ('R' - 'A')
-    .byte CHAR_A + ('R' - 'A'), CHAR_A + ('O' - 'A')
-    .byte CHAR_A + ('R' - 'A'), CHAR_SPACE, CHAR_SPACE, CHAR_SPACE, CHAR_SPACE
+    .byte CHAR_A + ('W' - 'A'), CHAR_A + ('A' - 'A'), CHAR_A + ('I' - 'A'), CHAR_A + ('T' - 'A'), CHAR_A + ('I' - 'A'), CHAR_A + ('N' - 'A'), CHAR_A + ('G' - 'A'), CHAR_SPACE, CHAR_SPACE
+link_live_chars:
+    .byte CHAR_A + ('L' - 'A'), CHAR_A + ('I' - 'A'), CHAR_A + ('V' - 'A'), CHAR_A + ('E' - 'A'), CHAR_SPACE, CHAR_SPACE, CHAR_SPACE, CHAR_SPACE, CHAR_SPACE
+link_no_answer_chars:
+    .byte CHAR_A + ('N' - 'A'), CHAR_A + ('O' - 'A'), CHAR_SPACE, CHAR_A + ('A' - 'A'), CHAR_A + ('N' - 'A'), CHAR_A + ('S' - 'A'), CHAR_A + ('W' - 'A'), CHAR_A + ('E' - 'A'), CHAR_A + ('R' - 'A')
+link_bad_data_chars:
+    .byte CHAR_A + ('B' - 'A'), CHAR_A + ('A' - 'A'), CHAR_A + ('D' - 'A'), CHAR_SPACE, CHAR_A + ('D' - 'A'), CHAR_A + ('A' - 'A'), CHAR_A + ('T' - 'A'), CHAR_A + ('A' - 'A'), CHAR_SPACE
+link_adsb_down_chars:
+    .byte CHAR_A + ('A' - 'A'), CHAR_A + ('D' - 'A'), CHAR_A + ('S' - 'A'), CHAR_A + ('B' - 'A'), CHAR_SPACE, CHAR_A + ('D' - 'A'), CHAR_A + ('O' - 'A'), CHAR_A + ('W' - 'A'), CHAR_A + ('N' - 'A')
 
 blank_identity_row:
     .repeat 12
@@ -3192,6 +2187,11 @@ startup_left_right:
 startup_confirm:
     .byte CHAR_A+('S'-'A'),CHAR_A+('T'-'A'),CHAR_A+('A'-'A'),CHAR_A+('R'-'A'),CHAR_A+('T'-'A'),CHAR_SPACE
     .byte CHAR_A+('C'-'A'),CHAR_A+('O'-'A'),CHAR_A+('N'-'A'),CHAR_A+('F'-'A'),CHAR_A+('I'-'A'),CHAR_A+('R'-'A'),CHAR_A+('M'-'A')
+.ifdef CART
+startup_menu:
+    .byte CHAR_A+('S'-'A'),CHAR_A+('E'-'A'),CHAR_A+('L'-'A'),CHAR_A+('E'-'A'),CHAR_A+('C'-'A'),CHAR_A+('T'-'A'),CHAR_SPACE
+    .byte CHAR_A+('M'-'A'),CHAR_A+('E'-'A'),CHAR_A+('N'-'A'),CHAR_A+('U'-'A')
+.endif
 startup_traffic_source:
     .byte FONT_DIM_BASE+CHAR_A+('T'-'A'),STARTUP_CHAR_R,STARTUP_CHAR_A,STARTUP_CHAR_F,STARTUP_CHAR_F,STARTUP_CHAR_I,STARTUP_CHAR_C
     .byte FONT_DIM_BASE+CHAR_SPACE,FONT_DIM_BASE+CHAR_A+('S'-'A'),STARTUP_CHAR_O,STARTUP_CHAR_U,STARTUP_CHAR_R,STARTUP_CHAR_C,STARTUP_CHAR_E
@@ -3259,6 +2259,7 @@ ldv_bg_att:
     .incbin "assets/ldv/ldv_bg.chr"
     .incbin "build/radar_sprites_16.chr"
 
+.ifndef CART                      ; the cartridge has the scope's tiles once
 .segment "CHR2"
     .incbin "assets/ldv/ldv_bg.chr"
     .incbin "build/radar_sprites_16.chr"
@@ -3266,3 +2267,4 @@ ldv_bg_att:
 .segment "CHR3"
     .incbin "assets/ldv/ldv_bg.chr"
     .incbin "build/radar_sprites_16.chr"
+.endif

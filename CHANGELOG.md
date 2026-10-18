@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.5.0
+
+- **Needs a [nesp32](https://github.com/Armitage64/nesp32) on controller
+  port 2.** The FTDI cable and the computer-side server are gone: the
+  nesp32 fetches traffic from adsb.fi itself, over Wi-Fi, and looks up
+  where an airport is on Wikidata.
+- The 0.4.x cable and server stay available on the
+  [`legacy/ftdi-0.4.x`](https://github.com/k6lcm/nes-radar/tree/legacy/ftdi-0.4.x)
+  branch and the 0.4.4 release.
+- The scope polls the nesp32 once a frame instead of listening to a
+  stream, so there are no chunk gaps, no quiet window, no heartbeat and no
+  pause request. Select goes straight to the editor, and the sprites keep
+  rotating whatever the link is doing.
+- The editor starts at the last airport the nesp32 found, which it keeps
+  over power-off, instead of KSBA.
+- The `LINK` field says `LIVE` when the scope is healthy, with dots that go
+  round while new scenes keep coming. Errors are words instead of numbers:
+  `NO ANSWER`, `BAD DATA`, `ADSB DOWN`. `IDLE`, `RECEIVING` and the
+  numbered `ERROR 1`–`ERROR 5` were about the cable's packets and are gone.
+- The cable's receiver, sender, packet parser and their state are removed
+  from the ROM.
+- New editor messages: `REQUESTING`, `LOOKUP FAILED`, `NO NESP32 ANSWER`,
+  `NESP32 NO WI-FI`, `UPDATE NESP32`.
+- The nesp32's link library is vendored in `nes_radar/vendor/nesp32`, so
+  the ROM still builds with cc65 alone.
+- The splash says `V0.5.0`.
+
+
 ## Server 0.4.4-build2
 
 - Remains paired with the 0.4.4 ROM and does not change the serial protocol.

@@ -1,2 +1,0 @@
-pyserial==3.5
-certifi==2026.7.22

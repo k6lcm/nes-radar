@@ -2,7 +2,6 @@
 # never tracked here.
 nes_radar/build/
 nes_radar/*.nes
-server/artifacts/
 
 # Python and macOS scratch
 __pycache__/
