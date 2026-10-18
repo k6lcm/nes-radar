@@ -55,12 +55,15 @@ On the scope the direction buttons choose among the aircraft, and Select goes ba
 
 | The scope's `LINK` says | Meaning |
 |---|---|
-| `LIVE...` | new scenes are coming from the nesp32: the dots go round while they do |
-| `LIVE` | the nesp32 is answering, but no new scene has come for ten seconds |
+| `LIVE` | the nesp32 answers, and the scene on the screen is good |
+| `LIVE...` | new data is coming in: a scene, or its aircraft's names. The dots go one, two, three, for half a second |
 | `WAITING` | no aircraft yet, or none for ten seconds, or nothing from adsb.fi for thirty |
 | `NO ANSWER` | the nesp32 has stopped answering. The last scene stays |
 | `BAD DATA` | the nesp32 sent an aircraft or a name that cannot be shown |
 | `ADSB DOWN` | the nesp32's last fetch from adsb.fi failed. The last scene stays |
+
+The nesp32 fetches the aircraft every eight seconds, so `LIVE...` comes
+round about that often.
 
 Wikidata has most airports, but not every small field, and it puts some a little way from where other databases have them.
 

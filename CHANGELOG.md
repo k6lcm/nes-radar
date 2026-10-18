@@ -15,8 +15,9 @@
   rotating whatever the link is doing.
 - The editor starts at the last airport the nesp32 found, which it keeps
   over power-off, instead of KSBA.
-- The `LINK` field says `LIVE` when the scope is healthy, with dots that go
-  round while new scenes keep coming. Errors are words instead of numbers:
+- The `LINK` field says `LIVE` when the scope is healthy, and `LIVE...`, its
+  dots going one, two, three for half a second, each time new data comes in:
+  a scene, or its aircraft's names. Errors are words instead of numbers:
   `NO ANSWER`, `BAD DATA`, `ADSB DOWN`. `IDLE`, `RECEIVING` and the
   numbered `ERROR 1`–`ERROR 5` were about the cable's packets and are gone.
 - The cable's receiver, sender, packet parser and their state are removed
