@@ -2,7 +2,8 @@
 
 **NES Radar turns a real Nintendo Entertainment System into a live air traffic scope.**
 
-**This project is in active development. Check back soon for updates and improvements.**
+> [!CAUTION]
+> **FTDI support is discontinued.** This branch and the 0.4.4 release are provided as-is for historical use. No support, maintenance, issues, pull requests, or other contributions are accepted for FTDI-based versions. Anyone interested in continuing development is welcome to fork the repository.
 
 Type any airport's four-letter ICAO code on the NES controller, press Start, and the aircraft actually flying near that airport *right now* appear as moving targets on your TV.
 
