@@ -216,7 +216,7 @@ radar_messages:
     sta radar_chosen
     jsr radar_begin
 @frame:
-    jsr update_selection        ; Select asks for the editor
+    jsr update_selection        ; B asks for the editor
     lda navigation_requested
     bne @leave
     jsr age_link
