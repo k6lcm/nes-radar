@@ -40,15 +40,15 @@ Downloads live on the [Releases page](https://github.com/k6lcm/nes-radar/release
 
 1. Load the ROM on the NES with the nesp32 in port 2.
 2. Up and Down change a letter, Left and Right move along the four. The editor starts at the last airport the nesp32 found, which it keeps when switched off, or KSBA if there is none.
-3. Press Start.
+3. Press Start or A.
 
-On the scope the direction buttons choose among the aircraft, and Select goes back to the editor.
+On the scope the direction buttons choose among the aircraft, and B goes back to the editor. On the nesp32's cartridge, Select goes back to its menu, from the editor or the scope.
 
 | The editor says | Meaning |
 |---|---|
 | `REQUESTING` | the nesp32 is looking the airport up: a second or two |
 | `INVALID AIRPORT` | Wikidata knows no airport with that ICAO code |
-| `LOOKUP FAILED` | Wikidata did not answer. Press Start to try again |
+| `LOOKUP FAILED` | Wikidata did not answer. Press Start or A to try again |
 | `NO NESP32 ANSWER` | no nesp32 is connected, or it is running something else |
 | `NESP32 NO WI-FI` | the nesp32 has not been set up, or the network is out of reach |
 | `UPDATE NESP32` | its firmware is older than this ROM, and has no RADAR service |

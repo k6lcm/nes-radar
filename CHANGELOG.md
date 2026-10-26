@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.0
+
+- **The buttons follow nesp32's cartridge.** A looks the airport up, as
+  Start does. On the scope B goes back to the editor, where Select used to.
+  On the cartridge, Select is its menu from the editor and from the scope.
+  B is only ever back a step and never leaves the program, so pressing it
+  again and again can't. A and B no longer move along the four letters:
+  Left and Right do.
+- The splash says `V0.6.0`.
+
 ## 0.5.0
 
 - **Needs a [nesp32](https://github.com/Armitage64/nesp32) on controller

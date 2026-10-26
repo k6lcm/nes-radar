@@ -266,8 +266,8 @@ radar_editor:                     ; nes/radar_link.inc comes back here
     lda controller_current
     sta controller_previous
 
-    lda controller_pressed
-    and #BUTTON_START
+    lda controller_pressed      ; Start or A: look it up. B, only ever back a
+    and #(BUTTON_START | BUTTON_A) ; step, has none to go back to here
     bne @submit_icao
 .ifdef CART
     lda controller_pressed
@@ -283,10 +283,10 @@ radar_editor:                     ; nes/radar_link.inc comes back here
     and #BUTTON_DOWN
     bne @letter_down
     lda controller_pressed
-    and #(BUTTON_RIGHT | BUTTON_A)
+    and #BUTTON_RIGHT
     bne @move_right
     lda controller_pressed
-    and #(BUTTON_LEFT | BUTTON_B)
+    and #BUTTON_LEFT
     bne @move_left
     jmp @editor_loop
 
@@ -631,15 +631,24 @@ radar_editor:                     ; nes/radar_link.inc comes back here
 .endproc
 
 ; Poll once after an accepted scene. Down/Right selects the next occupied slot;
-; Up/Left selects the previous. The cycle-timed receiver is never touched.
+; Up/Left selects the previous; B is back a step, to the editor; and on
+; nesp32's cartridge Select is its menu, as it is from the editor. B never
+; leaves the program, so that B pressed again and again cannot.
 .proc update_selection
     jsr latch_controller
     lda controller_pending
     sta controller_pressed
     lda #0
     sta controller_pending
+.ifdef CART
     lda controller_pressed
     and #BUTTON_SELECT
+    beq :+
+    jmp to_cart_menu
+:
+.endif
+    lda controller_pressed
+    and #BUTTON_B
     beq :+
     lda #1
     sta navigation_requested
@@ -648,7 +657,7 @@ radar_editor:                     ; nes/radar_link.inc comes back here
     jmp move_selection
 .endproc
 
-; The slot walk on its own, without the Select handling above.
+; The slot walk on its own, without the B and Select handling above.
 .proc move_selection
     lda selected_slot
     sta previous_selected_slot
@@ -1954,7 +1963,8 @@ radar_editor:                     ; nes/radar_link.inc comes back here
 .endproc
 
 .ifdef CART
-; Select in the editor, on nesp32's cartridge: back to its menu, the way
+; Select, in the editor or on the scope, on nesp32's cartridge: back to its
+; menu, the way
 ; reset goes there. The cartridge points this program's reset vector at
 ; the menu's stub, which resets the mapper and starts the menu. With the
 ; picture and the NMI off first, as a reset would leave them.
@@ -2142,11 +2152,11 @@ splash_title:
     .byte VER_N, VER_E, VER_S, VER_SPACE, VER_R, VER_A, VER_D, VER_A, VER_R
 SPLASH_TITLE_LENGTH = * - splash_title
 
-; "V0.5.0" -- the release version. Bump this and README.md together. The
+; "V0.6.0" -- the release version. Bump this and README.md together. The
 ; splash stamp is the only way to tell what is on a cartridge or in a .nes
 ; file once it is out of context.
 version_stamp:
-    .byte VER_V, VER_0 + 0, VER_DOT, VER_0 + 5, VER_DOT, VER_0 + 0
+    .byte VER_V, VER_0 + 0, VER_DOT, VER_0 + 6, VER_DOT, VER_0 + 0
 VERSION_STAMP_LENGTH = * - version_stamp
 
 .segment "RODATA"
