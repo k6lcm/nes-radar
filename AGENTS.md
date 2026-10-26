@@ -12,9 +12,11 @@ NES Radar lives in two repositories. Read this before changing anything.
   nes-radar as a git submodule at `third_party/nes-radar`. It builds the
   ROM for its cartridge and tests (`apps/nes-radar`), and has the
   firmware's RADAR service that the ROM talks to.
-- From 0.5.0 `main` is for a nesp32 only. The FTDI cable and its server
-  are on the **`legacy/ftdi-0.4.x`** branch (0.4.x releases). FTDI fixes
-  go there and nowhere else; never merge it into `main` or the other way.
+- From 0.5.0 `main` is for a nesp32 only. The final FTDI cable and server
+  source is frozen under the **`ftdi-eol`** tag (0.4.x releases). FTDI
+  support is discontinued: do not accept or propose FTDI fixes, issues,
+  pull requests, or other contributions. Anyone continuing it must fork
+  the repository. Never merge the frozen code into `main`.
 
 ## Where a change goes
 

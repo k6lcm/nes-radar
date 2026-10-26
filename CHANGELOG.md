@@ -16,9 +16,9 @@
   port 2.** The FTDI cable and the computer-side server are gone: the
   nesp32 fetches traffic from adsb.fi itself, over Wi-Fi, and looks up
   where an airport is on Wikidata.
-- The 0.4.x cable and server stay available on the
-  [`legacy/ftdi-0.4.x`](https://github.com/k6lcm/nes-radar/tree/legacy/ftdi-0.4.x)
-  branch and the 0.4.4 release.
+- The discontinued 0.4.x cable and server remain available as-is under
+  the [`ftdi-eol`](https://github.com/k6lcm/nes-radar/tree/ftdi-eol) tag
+  and in the 0.4.4 release.
 - The scope polls the nesp32 once a frame instead of listening to a
   stream, so there are no chunk gaps, no quiet window, no heartbeat and no
   pause request. Select goes straight to the editor, and the sprites keep

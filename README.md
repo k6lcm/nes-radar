@@ -14,8 +14,8 @@ The NES can't reach the Internet, so a [nesp32](https://github.com/Armitage64/ne
 
 This project is based on [c64u-radar](https://github.com/k6lcm/c64u-radar), a similar program for the Commodore 64.
 
-> [!NOTE]
-> **Still using the FTDI cable?** From 0.5.0 NES Radar needs a nesp32. The cable, the computer-side server and the 0.4.4 ROM are on the [`legacy/ftdi-0.4.x`](https://github.com/k6lcm/nes-radar/tree/legacy/ftdi-0.4.x) branch and the [0.4.4 release](https://github.com/k6lcm/nes-radar/releases/tag/0.4.4).
+> [!CAUTION]
+> **FTDI support ended with 0.4.4.** The final cable, server, and ROM source is preserved under the [`ftdi-eol`](https://github.com/k6lcm/nes-radar/tree/ftdi-eol) tag and in the [0.4.4 release](https://github.com/k6lcm/nes-radar/releases/tag/0.4.4). It is provided as-is for historical use. No support, maintenance, issues, pull requests, or other contributions are accepted for FTDI-based versions. Anyone interested in continuing development is welcome to fork the repository.
 
 ---
 
@@ -91,6 +91,6 @@ and the rules for keeping the two in step.
 | [`nes_radar/`](nes_radar) | The buildable NES ROM source, build files, record documentation, and required runtime assets. |
 | `nes_radar/vendor/nesp32/` | A copy of the nesp32's link library for the console. |
 
-Prior releases are tagged in git and their downloads are attached to their own [Release entries](https://github.com/k6lcm/nes-radar/releases). [`0.4.4`](https://github.com/k6lcm/nes-radar/tree/0.4.4) is the last FTDI-cable ROM and server, maintained on [`legacy/ftdi-0.4.x`](https://github.com/k6lcm/nes-radar/tree/legacy/ftdi-0.4.x). [`0.3.1`](https://github.com/k6lcm/nes-radar/tree/0.3.1) is the pulse-width cable and ROM.
+Prior releases are tagged in git and their downloads are attached to their own [Release entries](https://github.com/k6lcm/nes-radar/releases). [`0.4.4`](https://github.com/k6lcm/nes-radar/tree/0.4.4) is the last FTDI-cable ROM and server. Its final source is archived under [`ftdi-eol`](https://github.com/k6lcm/nes-radar/tree/ftdi-eol) and is unsupported; anyone continuing it should fork the repository. [`0.3.1`](https://github.com/k6lcm/nes-radar/tree/0.3.1) is the pulse-width cable and ROM.
 
 ![prototype cartridge](assets/prototype_cart.jpeg)
