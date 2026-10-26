@@ -4,7 +4,8 @@
 > This documents the discontinued 0.4.x FTDI cable. Its final source is
 > frozen under [`ftdi-eol`](https://github.com/k6lcm/nes-radar/tree/ftdi-eol).
 > It is provided as-is: no support, maintenance, issues, pull requests, or
-> other contributions are accepted. From 0.5.0 the ROM talks to a nesp32 instead, over
+> other contributions are accepted. From 0.5.0 the ROM talks to a nesp32
+> instead, over
 > [nesp32's link](https://github.com/Armitage64/nesp32/blob/main/docs/PROTOCOL.md).
 > The packet envelope, timing and requests below no longer apply. The
 > target and identity records still do: the nesp32's RADAR service sends
