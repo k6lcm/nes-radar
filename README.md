@@ -44,6 +44,8 @@ Downloads live on the [Releases page](https://github.com/k6lcm/nes-radar/release
 
 On the scope the direction buttons choose among the aircraft, and B goes back to the editor. On the nesp32's cartridge, Select goes back to its menu, from the editor or the scope.
 
+A Bluetooth keyboard paired with a StickS3 nesp32 works as well as the controller: type the airport's code (Backspace goes back a letter) and press Enter. Anywhere, the arrows are the direction buttons, Enter is A, Escape is B, Ctrl and Enter is Start, and Ctrl and Escape is Select.
+
 | The editor says | Meaning |
 |---|---|
 | `REQUESTING` | the nesp32 is looking the airport up: a second or two |
