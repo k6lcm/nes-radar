@@ -257,11 +257,25 @@ radar_editor:                     ; nes/radar_link.inc comes back here
     jsr radar_show_error          ; which of the reasons there was no scope
 
 @editor_loop:
+    inc radar_key_turn          ; every other frame, what is typed: before the
+    lda radar_key_turn          ; vblank, which the editor's writes are for
+    lsr a
+    bcc :+
+    jsr radar_editor_keys
+:
     jsr wait_vblank
     jsr read_controller
     lda controller_previous
     eor #$FF
     and controller_current
+    sta controller_pressed
+    jsr radar_editor_key        ; and a key typed on the Bluetooth keyboard:
+    bcs :+                      ; a letter goes where the cursor is, which
+    ldx editor_index            ; moves on
+    sta icao_code,x
+    jmp @move_right
+:
+    ora controller_pressed      ; or the buttons it stands for
     sta controller_pressed
     lda controller_current
     sta controller_previous
@@ -1144,6 +1158,9 @@ radar_editor:                     ; nes/radar_link.inc comes back here
 
 .proc latch_controller
     jsr read_controller
+    jsr nesp_key_next           ; a key typed that stands for buttons
+    ora controller_pending
+    sta controller_pending
     lda controller_previous
     eor #$FF
     and controller_current
@@ -2152,11 +2169,11 @@ splash_title:
     .byte VER_N, VER_E, VER_S, VER_SPACE, VER_R, VER_A, VER_D, VER_A, VER_R
 SPLASH_TITLE_LENGTH = * - splash_title
 
-; "V0.6.0" -- the release version. Bump this and README.md together. The
+; "V0.7.0" -- the release version. Bump this and README.md together. The
 ; splash stamp is the only way to tell what is on a cartridge or in a .nes
 ; file once it is out of context.
 version_stamp:
-    .byte VER_V, VER_0 + 0, VER_DOT, VER_0 + 6, VER_DOT, VER_0 + 0
+    .byte VER_V, VER_0 + 0, VER_DOT, VER_0 + 7, VER_DOT, VER_0 + 0
 VERSION_STAMP_LENGTH = * - version_stamp
 
 .segment "RODATA"
