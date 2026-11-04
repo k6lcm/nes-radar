@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.1
+
+- **16 KB on nesp32's cartridge.** The cartridge build (`CART`) says it
+  has one bank of PRG, not two, and nesp32 links it into the one bank at
+  `$C000`, which it fits in with half to spare. That leaves the
+  cartridge room for another program. The standalone ROM is as it was.
+- `nes_radar/vendor/nesp32/` is nesp32's link library as it now is: new
+  constants only.
+- The splash says `V0.7.1`.
+
 ## 0.7.0
 
 - **A Bluetooth keyboard works as the controller.** On a StickS3 nesp32

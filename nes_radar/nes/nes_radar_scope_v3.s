@@ -177,11 +177,12 @@ splash_frames:   .res 1
 
 .segment "HEADER"
     .byte "NES", $1A
-    .byte 2                       ; 32 KiB fixed PRG
 .ifdef CART
+    .byte 1                       ; 16 KiB of PRG, at $C000: all the cartridge has room for
     .byte 2                       ; the splash's tiles and the scope's, once each
     .byte $10, $00                ; a part of nesp32's cartridge, which is an MMC1
 .else
+    .byte 2                       ; 32 KiB fixed PRG
     .byte 4                       ; four 8 KiB CHR-ROM banks
     .byte $30, $00                ; mapper 3 CN-ROM, horizontal mirroring
 .endif
@@ -2169,11 +2170,11 @@ splash_title:
     .byte VER_N, VER_E, VER_S, VER_SPACE, VER_R, VER_A, VER_D, VER_A, VER_R
 SPLASH_TITLE_LENGTH = * - splash_title
 
-; "V0.7.0" -- the release version. Bump this and README.md together. The
+; "V0.7.1" -- the release version. Bump this and README.md together. The
 ; splash stamp is the only way to tell what is on a cartridge or in a .nes
 ; file once it is out of context.
 version_stamp:
-    .byte VER_V, VER_0 + 0, VER_DOT, VER_0 + 7, VER_DOT, VER_0 + 0
+    .byte VER_V, VER_0 + 0, VER_DOT, VER_0 + 7, VER_DOT, VER_0 + 1
 VERSION_STAMP_LENGTH = * - version_stamp
 
 .segment "RODATA"
