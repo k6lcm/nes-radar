@@ -38,13 +38,14 @@
 OUT0_MARK = $01
 
 NESP_RX_MASK = $7F              ; a scene's reply is 78 bytes
-NESP_TX_MAX  = 8                ; the hello: 7 bytes and one service
+NESP_TX_MAX  = 9                ; the hello: 7 bytes and two services
 NESP_CRC_TABLE = 1              ; 35 cycles a byte: a scene's exchange and what
                                 ; is made of it fit in a frame
 NESP_TIMEOUT = 2                ; passes of 4.15 ms waited for a reply
 NESP_NMI_ONLY = 1               ; no exchange is made with the NMI on
 .define NESP_APP "RADR"
 NESP_APP_VERSION = 1
+NESP_KEY_PAD = 1                ; the Bluetooth keyboard's keys as the controller's buttons
 
 .include "nesp.inc"
 
@@ -73,6 +74,7 @@ NAMES_HEAD    = 3
 .assert SCENE_HEAD + MAX_TARGETS * RECORD_SIZE <= NESP_RX_MASK, error, "a scene must fit its buffer"
 
 POLL_FRAMES   = 30              ; between one SCENE and the next
+KEYS_TURN     = 3               ; the scope's frame of eight (oam_rotation) for KEYS
 MISS_LIMIT    = 8               ; exchanges in a row unanswered before the scope says so
 ANSWER_FRAMES = 120             ; and frames the editor waits for a nesp32
 RECALL_FRAMES = 8               ; and the splash, for the airport it kept
@@ -100,6 +102,11 @@ radar_slot:       .res 1        ; the next of them to ask for; MAX_TARGETS when 
 radar_wait:       .res 1        ; frames to the next SCENE
 radar_misses:     .res 1        ; exchanges in a row with no answer
 radar_tries:      .res 1
+radar_keys_ok:    .res 1        ; the hello had KBD: what is typed is asked for
+radar_key_at:     .res 1        ; the next key of a KEYS reply
+radar_key_turn:   .res 1        ; the editor's frames, for asking every other one
+radar_typing:     .res 1        ; the keys asked for are the editor's
+radar_letters:    .res 1        ; how many keys are kept for it, in radar_typed
 
 .segment "RODATA"
 ; The editor's messages, sixteen characters as nes-radar's own are.
@@ -136,10 +143,7 @@ radar_messages:
     jsr wait_vblank
     lda radar_greeted
     bne @ask
-    lda #NESP_SVC_RADAR
-    sta nesp_request + NESP_HELLO_FIXED
-    ldy #1
-    jsr nesp_hello
+    jsr radar_hello
     bcs @silent
     cmp #NESP_ST_OK
     bne @done                   ; a firmware with no RADAR: Start will say so
@@ -223,7 +227,14 @@ radar_messages:
     bcc :+
     jsr commit_display          ; ten seconds with nothing: WAITING
 :
+    lda oam_rotation            ; one frame in eight, what is typed, in
+    cmp #KEYS_TURN              ; place of the scene's exchange
+    bne @poll
+    jsr radar_keys
+    jmp @polled
+@poll:
     jsr radar_poll
+@polled:
     lda startup_error           ; the nesp32 no longer has the airport, and why
     bne @leave
 
@@ -277,6 +288,135 @@ radar_messages:
 .endproc
 
 ; Nothing on the screen is the nesp32's yet: ask for the scene at once.
+; Hello: RADAR, and KBD, for the keys that stand for the controller's
+; buttons (radar_keys), and so that the keyboard stays connected from one
+; program on nesp32's cartridge to the next. As nesp_hello: carry set if no
+; reply, else the status in A, with a nesp32 that lacks only KBD answered
+; as OK, and radar_keys_ok saying which.
+.proc radar_hello
+    lda #NESP_SVC_RADAR
+    sta nesp_request + NESP_HELLO_FIXED
+    lda #NESP_SVC_KBD
+    sta nesp_request + NESP_HELLO_FIXED + 1
+    ldy #2
+    jsr nesp_hello
+    bcs @silent
+    ldx #1
+    stx radar_keys_ok
+    cmp #NESP_ST_NO_SERVICE
+    bne @came
+    ldx nesp_reply + 6
+    cpx #1
+    bne @came
+    ldx nesp_reply + 7
+    cpx #NESP_SVC_KBD
+    bne @came
+    lda #0
+    sta radar_keys_ok
+    lda #NESP_ST_OK
+@came:
+    clc
+@silent:
+    rts
+.endproc
+
+TYPED_MAX = NESP_KBD_KEYS_MAX    ; keys kept for the editor: a KEYS reply's
+
+.segment "BSS"
+radar_typed:      .res TYPED_MAX
+.segment "CODE"
+
+; The editor's keys (radar_keys): kept as they are, in the order typed, for
+; radar_editor_key to take one a frame.
+.proc radar_editor_keys
+    lda #1
+    sta radar_typing
+    jsr radar_keys
+    lda #0
+    sta radar_typing
+    rts
+.endproc
+
+; The next key typed for the editor. A letter, in either case: carry clear,
+; and the capital in A. Anything else: carry set, and the buttons it stands
+; for in A (nesp_key_pad), Backspace Left; 0 for none.
+.proc radar_editor_key
+    lda radar_letters
+    beq @none
+    lda radar_typed
+    pha
+    ldx #0
+@shift:
+    lda radar_typed + 1,x
+    sta radar_typed,x
+    inx
+    cpx #TYPED_MAX - 1
+    bcc @shift
+    dec radar_letters
+    pla
+    tax
+    and #<~$20                    ; a letter in either case
+    cmp #'A'
+    bcc @other
+    cmp #'Z' + 1
+    bcs @other
+    clc
+    rts
+@other:
+    txa
+    cmp #NESP_KEY_BACKSPACE
+    bne @button
+    lda #NESP_KEY_LEFT
+@button:
+    jsr nesp_key_pad
+    sec
+    rts
+@none:
+    lda #0
+    sec
+    rts
+.endproc
+
+; What has been typed on the Bluetooth keyboard, kept as presses of the
+; controller's buttons (nesp_key_queue), with a nesp32 whose hello had KBD.
+; Nothing else is made of the reply, or of none: the scene's exchanges say
+; how the nesp32 stands.
+.proc radar_keys
+    lda radar_greeted
+    beq @done
+    lda radar_keys_ok
+    beq @done
+    lda #NESP_SVC_KBD
+    ldx #NESP_KBD_KEYS
+    ldy #0
+    jsr nesp_call
+    bcs @done
+    cmp #NESP_ST_OK
+    bne @done
+    lda #0
+    sta radar_key_at
+@key:
+    ldx radar_key_at
+    cpx nesp_reply
+    bcs @done
+    lda nesp_reply + 1,x
+    ldx radar_typing
+    beq @button
+    ldx radar_letters             ; the editor's, all of them, in order
+    cpx #TYPED_MAX
+    bcs @next
+    sta radar_typed,x
+    inc radar_letters
+    bne @next
+@button:
+    jsr nesp_key_queue
+@next:
+    inc radar_key_at
+    bne @key
+@done:
+    rts
+.endproc
+
 .proc radar_begin
     lda #0
     sta radar_have
@@ -294,10 +434,7 @@ radar_messages:
 .proc radar_open
     lda radar_greeted
     bne @choose
-    lda #NESP_SVC_RADAR
-    sta nesp_request + NESP_HELLO_FIXED
-    ldy #1
-    jsr nesp_hello
+    jsr radar_hello
     bcs @silent
     cmp #NESP_ST_OK
     bne @update

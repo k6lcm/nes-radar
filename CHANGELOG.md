@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.0
+
+- **A Bluetooth keyboard works as the controller.** On a StickS3 nesp32
+  with a keyboard paired, the airport's code can be typed into the
+  editor, in either case, with Backspace going back a letter, and Enter
+  looks it up. Everywhere the arrows are the direction buttons, Enter is
+  A, Escape B, Ctrl and Enter Start, and Ctrl and Escape Select, as in
+  every program on nesp32's cartridge. It needs nesp32 firmware with the
+  keyboard's Start and Select keys.
+- The hello asks the nesp32 for KBD as well as RADAR, so a keyboard stays
+  connected from one program on nesp32's cartridge to the next. A nesp32
+  without KBD is used all the same, with the controller alone.
+- `nes_radar/vendor/nesp32/` is nesp32's link library as it now is.
+- The splash says `V0.7.0`.
+
 ## 0.6.0
 
 - **The buttons follow nesp32's cartridge.** A looks the airport up, as

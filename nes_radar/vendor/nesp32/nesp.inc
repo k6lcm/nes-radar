@@ -23,6 +23,9 @@
 ;                   (docs/PROTOCOL.md): a request of five bytes or six and
 ;                   a reply of four or five, where the least a frame can be
 ;                   is seven. With NESP_CRC_TABLE and NESP_TIMEOUT
+;   NESP_KEY_PAD    optional. nesp_key_pad, nesp_key_queue and
+;                   nesp_key_next, for a ROM that takes the Bluetooth
+;                   keyboard's keys (KBD KEYS) as its controller's buttons
 ;   NESP_OWN_MEMORY optional. The ROM has named every byte of memory below
 ;                   itself, before including this: for a game with no run
 ;                   of zero page to spare (nes-contra). Only what the
@@ -487,5 +490,84 @@ nesp_rng:       .res 2
     sta nesp_rng + 1
     rts
 .endproc
+
+.endif
+
+.ifdef NESP_KEY_PAD
+
+; A character from KBD KEYS, A, as the controller's buttons it stands for,
+; in a read's order from bit 7 (A, B, Select, Start, Up, Down, Left,
+; Right), or 0 if it is none: Enter is A, Escape B, Ctrl and Escape Select,
+; Ctrl and Enter Start, and the arrows the D-pad. X is lost.
+.proc nesp_key_pad
+    ldx #7
+@find:
+    cmp nesp_key_pad_keys,x
+    beq @found
+    dex
+    bpl @find
+    lda #0
+    rts
+@found:
+    lda nesp_key_pad_bits,x
+    rts
+.endproc
+
+; A character from KBD KEYS, A, kept as a press of the buttons it stands
+; for, if it stands for any and there is room: nesp_key_next has them, one
+; press a frame, so that two of a key typed together are two presses. X
+; and Y are lost.
+.ifdef NESP_OWN_MEMORY
+.error "NESP_KEY_PAD keeps its presses in BSS"
+.endif
+NESP_KEY_PRESSES = 8                ; a power of two
+.segment "BSS"
+nesp_key_presses: .res NESP_KEY_PRESSES
+nesp_key_first:   .res 1
+nesp_key_count:   .res 1
+.segment "CODE"
+
+.proc nesp_key_queue
+    jsr nesp_key_pad
+    beq @done
+    ldy nesp_key_count
+    cpy #NESP_KEY_PRESSES
+    bcs @done
+    tax
+    tya
+    clc
+    adc nesp_key_first
+    and #NESP_KEY_PRESSES - 1
+    tay
+    txa
+    sta nesp_key_presses,y
+    inc nesp_key_count
+@done:
+    rts
+.endproc
+
+; The next press kept, as buttons in A (for the ROM to add to what went down
+; on its controller this frame), or 0. X is lost.
+.proc nesp_key_next
+    lda nesp_key_count
+    beq @done
+    dec nesp_key_count
+    ldx nesp_key_first
+    lda nesp_key_presses,x
+    pha
+    inx
+    txa
+    and #NESP_KEY_PRESSES - 1
+    sta nesp_key_first
+    pla
+@done:
+    rts
+.endproc
+
+nesp_key_pad_keys:
+    .byte NESP_KEY_ENTER, NESP_KEY_ESCAPE, NESP_KEY_SELECT, NESP_KEY_START
+    .byte NESP_KEY_UP, NESP_KEY_DOWN, NESP_KEY_LEFT, NESP_KEY_RIGHT
+nesp_key_pad_bits:
+    .byte $80, $40, $20, $10, $08, $04, $02, $01
 
 .endif
