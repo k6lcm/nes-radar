@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `nes_radar/vendor/nesp32/` is nesp32's link library as it now is
+  (nesp32 d9f244d, for its 0.4.0): new constants, and in `nesp.inc` a
+  faster line for netplay that is assembled only with
+  `NESP_SHORT_PERIOD`. The ROM is the same, byte for byte.
+
 ## 0.7.1
 
 - **16 KB on nesp32's cartridge.** The cartridge build (`CART`) says it
