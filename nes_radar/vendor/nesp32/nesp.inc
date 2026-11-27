@@ -52,6 +52,12 @@
 ;                   a good reply came, with its data at nesp_rx + 3; carry
 ;                   set if none did. It has no sequence number, and is not
 ;                   kept to be sent again
+;   nesp_fast       with link.inc made with --short-period (NESP_SHORT_PERIOD):
+;                   bit 7 set, and nesp_short is at that rate, both ways,
+;                   for a PEER session whose line the Stick has agreed to
+;                   run so (PEER's RATE). Everything else stays at the
+;                   link's rate. The ROM's to set and clear, and to name
+;                   with NESP_OWN_MEMORY
 ;
 ; The serial routines count CPU cycles (link.inc, generated), so nothing
 ; may interrupt them, and the receiver waits for a start bit with no timeout
@@ -106,6 +112,9 @@ nesp_tries:     .res 1
 .segment "BSS"
 nesp_rx:        .res NESP_RX_MASK + 1 + NESP_OVERHEAD
 nesp_tx:        .res NESP_TX_MAX + NESP_OVERHEAD
+.ifdef NESP_SHORT_PERIOD
+nesp_fast:      .res 1
+.endif
 .endif
 nesp_request   = nesp_tx + NESP_HEADER
 nesp_reply     = nesp_rx + NESP_HEADER
@@ -352,7 +361,15 @@ nesp_reply_len = nesp_rx + NESP_HEADER - 1
     ldx #0
 @send:
     lda nesp_tx,x
+.ifdef NESP_SHORT_PERIOD
+    bit nesp_fast
+    bpl @link
+    jsr nesp_fast_tx_byte       ; at the session's rate; preserves X
+    jmp @sent
+@link:
+.endif
     jsr nesp_tx_byte            ; preserves X
+@sent:
     inx
     cpx nesp_tx_len
     bne @send
@@ -364,7 +381,15 @@ nesp_reply_len = nesp_rx + NESP_HEADER - 1
     clc
     adc #5
     ldy #2
+.ifdef NESP_SHORT_PERIOD
+    bit nesp_fast
+    bpl @link_reply
+    jsr nesp_fast_rx_bytes      ; at the session's rate
+    jmp @heard
+@link_reply:
+.endif
     jsr nesp_rx_bytes
+@heard:
     bcs @bad                    ; the wait for it ran out
     lda nesp_rx + 2
     and #NESP_SHORT_MARK
